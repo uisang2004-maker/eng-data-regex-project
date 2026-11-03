@@ -600,8 +600,9 @@ def validation_page() -> None:
     bench = load_benchmark()
     if bench:
         b = bench["summary"]
-        mask_row = ("measured", f"{b['date']} · 초록 {b['papers']}편 · 보호 토큰 {b['tokens']}개 중 "
-                    f"마스킹 켬 {b['on_kept']}개 / 끔 {b['off_kept']}개가 번역문에 그대로 남음")
+        mask_row = ("measured", f"{b['date']} · 초록 {b['papers']}편 · 보호 토큰 {b['tokens']}개 중 문자열 그대로 남은 것: "
+                    f"마스킹 켬 {b['on_kept']}개 / 끔 {b['off_kept']}개. 단, 끔 쪽 차이 대부분은 값이 같은 표기 변환이었고 "
+                    "의미 있는 손실은 약어 2건뿐. 켬 쪽에서는 수치 보호 때문에 틀린 숫자가 1건 나와 수치 보호를 뺐어요(아래 상세)")
     else:
         mask_row = ("planned", "2주차 실측 예정(30편). 사전 3문장 실험(2026-11-04)에서는 마스킹 끔에서도 BERT·3.1%·[4]가 "
                     "보존됐고 Table 1이 '표 1'로 바뀐 차이만 있었어요")
@@ -623,6 +624,18 @@ def validation_page() -> None:
                 f'<th>상태</th><th>내용</th></tr></thead><tbody>{body}</tbody></table></div>', unsafe_allow_html=True)
     with st.expander("카드별 근거 분포(측정값)"):
         st.write({"신호 문구만": so["by_card"], "위치 대체 포함": wf["by_card"]})
+    if bench and bench.get("analysis"):
+        an = bench["analysis"]
+        with st.expander("마스킹 실측 상세 — 손실을 하나씩 분류한 결과"):
+            st.caption(an["metric_note"])
+            st.markdown(f"**마스킹 끔에서 문자열이 바뀐 토큰 {an['off_lost_total']}개**")
+            for title, items in (("값은 같고 표기만 바뀜", an["off_lost_benign"]),
+                                 ("의미 있는 손실", an["off_lost_meaningful"]),
+                                 ("탐지 오류(수정함)", an["off_lost_detection_error"])):
+                st.markdown(f"- {title}: " + ", ".join(f"{k} {v}개" for k, v in items.items()))
+            st.markdown("**마스킹 켬에서 생긴 문제**: " + ", ".join(f"{k} ({v}개)" for k, v in an["on_lost"].items()))
+            st.markdown(f"**결정**: {an['decision']}")
+            st.caption(f"설정: {bench['summary'].get('config', '')} · 전송량 약 {bench['summary'].get('chars_sent_approx', 0):,}자")
     st.markdown(sec_head("!", "알려진 한계"), unsafe_allow_html=True)
     st.markdown(
         "- 샘플은 연도별 연말 최신 제출 50편이라 대표성이 없어요.\n"

@@ -41,6 +41,11 @@ def test_all_letters_retry_only_when_needed():
     assert match_long_form("CoT", "Chain-of-Thought ", all_letters=True) == "Chain-of-Thought"
 
 
+def test_capitalized_emphasis_is_not_acronym():
+    acr = find_acronyms("We propose CREST, a method for Cognitive REasoning Steering.")
+    assert "REasoning" not in acr and "CREST" in acr
+
+
 def test_bare_acronym_marked_as_missing():
     a = analyze("GPU memory is limited. We test it.")
     assert a.acronyms == {"GPU": None}

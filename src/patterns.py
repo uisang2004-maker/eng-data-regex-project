@@ -81,7 +81,13 @@ WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*")
 """풀네임 후보를 이루는 단어(하이픈 단어는 한 덩어리)."""
 
 BARE_ACRONYM = re.compile(r"\b[A-Z][A-Za-z]*[A-Z][A-Za-z0-9]*s?\b")
-"""정의 없이 쓰인 대문자 약어 후보: ``GPU``, ``GPT``."""
+"""정의 없이 쓰인 대문자 약어 후보: ``GPU``, ``GPT``.
+
+대문자 비율이 BARE_MIN_UPPER_RATIO 미만이면 약어로 보지 않는다(extract.py). ``REasoning``처럼
+강조용으로 앞 두 글자만 대문자인 단어를 거르기 위해서다(``XGBoost`` 0.43은 통과).
+"""
+
+BARE_MIN_UPPER_RATIO = 0.4
 
 ABBR_RULE = Rule(
     "ABBR", "abbr", "약어",
@@ -245,10 +251,15 @@ DEFAULT_ACTIVE_RULES = frozenset(r.name for r in TOGGLEABLE_RULES)
 # ====================================================================== 번역 보호·후처리 (P0-5)
 
 NUMBER = re.compile(r"(?<![\w.])\d+(?:,\d{3})*(?:\.\d+)?(?:\s?%|x\b)?")
-"""보호할 수치: ``8.4%``, ``1,000``, ``3x``."""
+"""수치: ``8.4%``, ``1,000``, ``3x``. 번역 보호에는 쓰지 않는다(아래 참고)."""
 
-PROTECT_PATTERNS = (URL, MATH, CITE_NUM, CITE_AUTHOR, XREF, NUMBER)
-"""번역에서 보호할 토큰(앞에 있을수록 우선). 약어는 문서마다 달라서 translate.py가 앞에 붙인다."""
+PROTECT_PATTERNS = (URL, MATH, CITE_NUM, CITE_AUTHOR, XREF)
+"""번역에서 보호할 토큰(앞에 있을수록 우선). 약어는 문서마다 달라서 translate.py가 앞에 붙인다.
+
+수치(NUMBER)는 2026-11-04 마스킹 30편 실측 뒤 뺐다. 수치를 <x>로 가리자 DeepL이 한 문장 안의
+'우리 방법 72.3%'와 '기존 방법 67.9%'를 구분하지 못하고 앞 수치를 두 번 써서 틀린 숫자를 만들었다
+(1812.10896). 마스킹을 끄면 수치는 '2,000', '1,000만'처럼 표기만 바뀌고 값은 맞았다.
+"""
 
 X_TAG = re.compile(r"</?x>")
 SENT_TAG = re.compile(r"<s>(.*?)</s>", re.S)

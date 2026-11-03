@@ -110,7 +110,8 @@ def find_acronyms(text: str) -> dict[str, str | None]:
             found.setdefault(key, None)
     for m in P.BARE_ACRONYM.finditer(text):
         key = _strip_plural(m.group(0))
-        if sum(ch.isupper() for ch in key) >= 2:
+        upper = sum(ch.isupper() for ch in key)
+        if upper >= 2 and upper / len(key) >= P.BARE_MIN_UPPER_RATIO:
             found.setdefault(key, None)
     return found
 

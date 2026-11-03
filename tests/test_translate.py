@@ -28,7 +28,13 @@ def test_protect_roundtrip_on_samples():
 
 def test_protect_tokens():
     x = T.protect("As shown in Fig. 3, LLMs reach 87% (Smith et al., 2021) [4].", {"LLM": "x"})
-    assert T.protected_tokens(x) == ["Fig. 3", "LLMs", "87%", "(Smith et al., 2021)", "[4]"]
+    assert T.protected_tokens(x) == ["Fig. 3", "LLMs", "(Smith et al., 2021)", "[4]"]
+
+
+def test_numbers_are_not_protected():
+    """실측(2026-11-04)에서 수치를 가리면 DeepL이 수치를 뒤섞어서, 수치는 보호하지 않는다."""
+    x = T.protect("Ours reaches 72.3% while the baseline reaches 67.9%.")
+    assert "<x>" not in x
 
 
 def test_protect_escapes_xml():
