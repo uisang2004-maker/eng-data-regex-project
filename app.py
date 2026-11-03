@@ -36,6 +36,7 @@ KIND_META = {
 }
 BASIS_TEXT = {"signal": "신호 문구로 찾음", "position": "위치로 추정", "none": "찾지 못함"}
 MARK_LABEL = {"abbr": "약어", "abbr-missing": "약어(정의 없음)", "hedge": "추측·가능성", "confident": "확신", "reference": "참조"}
+CAT_RULE = {"abbr": "ABBR", "abbr-missing": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE"}
 
 ICON = {
     "doc": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>',
@@ -62,6 +63,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
   font-family: Pretendard, "Malgun Gothic", "Segoe UI", sans-serif;
 }
 .stApp * { font-family: Pretendard, "Malgun Gothic", "Segoe UI", sans-serif; }
+.stApp [data-testid="stIconMaterial"], .stApp [data-testid="stIconMaterial"] * { font-family: "Material Symbols Rounded" !important; }
 code, pre, .pp-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; }
 header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] { display:none !important; }
 .block-container { max-width: 1320px !important; padding: 0 16px 40px !important; }
@@ -264,6 +266,27 @@ def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
+def render_ko(ko: str, ko_marks, active) -> str:
+    """번역문 형광펜. 위치는 DeepL이 옮긴 태그에서 복원한 것이라 툴팁에 '대응 추정'임을 밝힌다."""
+    out, pos = [], 0
+    for a, b, cat, en in ko_marks:
+        if CAT_RULE.get(cat) not in active or a < pos:
+            continue
+        tip = esc(f"{MARK_LABEL[cat]} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)")
+        out += [esc(ko[pos:a]), f'<span class="pp-m {cat}" tabindex="0" title="{tip}" data-tip="{tip}" '
+                                f'aria-label="{tip}">{esc(ko[a:b])}</span>']
+        pos = b
+    out.append(esc(ko[pos:]))
+    return "".join(out)
+
+
+def sentence_marks(raw_text: str):
+    """번역에 보낼 문장별 영어 형광펜 구간. 규칙 켜고 끄기와 상관없이 기본 규칙으로 만들어 캐시를 안정시킨다."""
+    full = analyze(raw_text)
+    return [[(m.start - s.start, m.end - s.start, m.category) for m in full.marks if s.start <= m.start and m.end <= s.end]
+            for s in full.sentences]
+
+
 def render_marked(text: str, start: int, end: int, marks) -> str:
     out, pos = [], start
     for m in marks:
@@ -427,7 +450,8 @@ def translation_panel(a) -> None:
                         unsafe_allow_html=True)
             if st.button("번역하기", type="primary", key="translate_btn"):
                 with st.spinner("번역하는 중…"):
-                    ss.translations[(tkey, True)] = T.translate(sents, a.acronyms, masked=True, use_file_cache=file_cache)
+                    ss.translations[(tkey, True)] = T.translate(sents, a.acronyms, masked=True, use_file_cache=file_cache,
+                                                                marks=sentence_marks(ss.input_text))
                 st.rerun()
             return
 
@@ -444,13 +468,14 @@ def translation_panel(a) -> None:
                     unsafe_allow_html=True)
         off = ss.translations.get((tkey, False))
         if res.ko is not None:
+            marks_ko = res.ko_marks or []
             rows = []
             for i, ko in enumerate(res.ko):
                 extra = ""
                 if off and off.ko is not None and i < len(off.ko) and off.ko[i] != ko:
                     extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
                 rows.append(f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div>'
-                            f'<div><div class="pp-text">{esc(ko)}</div>{extra}</div></div>')
+                            f'<div><div class="pp-text">{render_ko(ko, marks_ko[i] if i < len(marks_ko) else [], a.active_rules)}</div>{extra}</div></div>')
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)

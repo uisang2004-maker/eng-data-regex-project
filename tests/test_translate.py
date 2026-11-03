@@ -115,3 +115,53 @@ def test_split_error_does_not_spread():
     """문장이 잘못 끊겨도 다른 문장의 짝은 밀리지 않는다(문장마다 태그로 짝지음)."""
     r = T.translate(["Half one", "half two.", "Next sentence."], caller=fake_ok, api_key="k")
     assert r.ko[2] == "KO:Next sentence."
+
+
+# ---------------------------------------------------------------- 한국어 형광펜(표시 태그)
+
+def test_to_xml_wraps_marks():
+    s = "RAG may help [4]."
+    marks = [(0, 3, "abbr"), (4, 7, "hedge"), (13, 16, "reference")]
+    x = T.to_xml(s, {"RAG": "Retrieval-augmented generation"}, masked=True, marks=marks)
+    assert x == '<x c="abbr" i="0">RAG</x> <m c="hedge" i="1">may</m> help <x c="reference" i="2">[4]</x>.'
+
+
+def test_unmasked_without_marks_is_plain_escape():
+    """마크가 없으면 예전과 같은 XML이라, 이전 실측의 마스킹 끔 캐시가 그대로 맞는다."""
+    assert T.to_xml("a < b [4]", masked=False) == "a &lt; b [4]"
+
+
+def test_unmasked_marks_use_m_tags():
+    x = T.to_xml("See Table 2.", masked=False, marks=[(4, 11, "reference")])
+    assert x == 'See <m c="reference" i="0">Table 2</m>.'
+
+
+def test_ko_marks_follow_moved_tags():
+    def fake(texts, key, split):
+        return ['<s>이 결과는 도움이 될 <m c="hedge" i="0">수</m> 있음을 <m c="hedge" i="1">시사한다</m> '
+                '<x c="reference" i="2">[4]</x>.</s>']
+
+    s = "These findings suggest it may help [4]."
+    marks = [(26, 29, "hedge"), (15, 22, "hedge"), (35, 38, "reference")]
+    r = T.translate([s], {}, marks=[marks], caller=fake, api_key="k")
+    assert r.ko == ["이 결과는 도움이 될 수 있음을 시사한다[4]."]
+    got = [(r.ko[0][a:b], c, en) for a, b, c, en in r.ko_marks[0]]
+    assert got == [("수", "hedge", "may"), ("시사한다", "hedge", "suggest"), ("[4]", "reference", "[4]")]
+
+
+def test_lost_tag_is_dropped_without_error():
+    def fake(texts, key, split):
+        return ["<s>반드시 반영하는 것은 아니다.</s>"]
+
+    r = T.translate(["It may not necessarily reflect use."], {}, marks=[[(3, 6, "hedge")]], caller=fake, api_key="k")
+    assert r.ko == ["반드시 반영하는 것은 아니다."] and r.ko_marks == [[]]
+
+
+def test_ko_marks_survive_file_cache():
+    def fake(texts, key, split):
+        return ['<s><m c="confident" i="0">크게</m> 향상됨.</s>']
+
+    args = (["It greatly improves."], {})
+    first = T.translate(*args, marks=[[(3, 10, "confident")]], caller=fake, api_key="k")
+    second = T.translate(*args, marks=[[(3, 10, "confident")]], caller=fake, api_key="k")
+    assert second.cached and second.ko_marks == first.ko_marks == [[(0, 2, "confident", "greatly")]]

@@ -88,3 +88,26 @@ def test_pages_render(at):
         assert not at.exception, page
     at.radio(key="page").set_value("검증 결과").run()
     assert "측정" in md_text(at)
+
+
+def test_korean_highlights_follow_rules(at):
+    import hashlib
+
+    from src.extract import analyze
+    from src.translate import TranslationResult
+
+    a = analyze(at.session_state["input_text"])
+    key = (hashlib.sha256(a.text.encode("utf-8")).hexdigest()[:16], True)
+    ko = ["가"] * (len(a.sentences) - 1) + ["도움이 될 수 있음을 시사한다[4]."]
+    km = [[] for _ in ko]
+    km[-1] = [(11, 15, "hedge", "suggest"), (15, 18, "reference", "[4]")]
+    at.session_state["translations"] = {key: TranslationResult(ko=ko, mode="aligned", ko_marks=km,
+                                                               protected=[[]] * len(ko))}
+    at.run()
+    text = md_text(at)
+    assert "영어 &#x27;suggest&#x27;에 대응" in text or "영어 'suggest'에 대응" in text
+    at.toggle(key="show_steps").set_value(True).run()
+    at.checkbox(key="rule_HEDGE").uncheck().run()
+    text = md_text(at)
+    assert "suggest&#x27;에 대응" not in text and "'suggest'에 대응" not in text
+    assert "[4]&#x27;에 대응" in text or "'[4]'에 대응" in text

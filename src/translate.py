@@ -52,12 +52,16 @@ class TranslationResult:
     cached: bool = False
     error: str | None = None
     protected: list[list[str]] = field(default_factory=list)   # 문장별 보호 토큰
+    # 문장별 한국어 형광펜: (시작, 끝, 범주, 대응하는 영어 표현). DeepL이 옮긴 태그 위치에서 복원한다.
+    ko_marks: list[list[tuple[int, int, str, str]]] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------- 마스킹
+Mark = tuple[int, int, str]   # 문장 안의 (시작, 끝, 범주)
 
-def protect(sentence: str, acronyms: dict[str, str | None] | None = None) -> str:
-    """보호할 구간을 <x>로 감싸고 나머지는 XML 이스케이프한다."""
+
+# ---------------------------------------------------------------- 마스킹·표시 태그
+
+def _protect_spans(sentence: str, acronyms: dict[str, str | None] | None) -> list[tuple[int, int]]:
     pats = list(P.PROTECT_PATTERNS)
     if acronyms:
         names = sorted(acronyms, key=len, reverse=True)
@@ -67,12 +71,37 @@ def protect(sentence: str, acronyms: dict[str, str | None] | None = None) -> str
         for m in pat.finditer(sentence):
             if m.end() > m.start() and all(m.end() <= a or m.start() >= b for a, b in spans):
                 spans.append((m.start(), m.end()))
+    return spans
+
+
+def to_xml(sentence: str, acronyms: dict[str, str | None] | None = None, masked: bool = True,
+           marks: list[Mark] | None = None) -> str:
+    """번역에 보낼 XML을 만든다.
+
+    - masked면 보호 구간을 <x>로 감싼다(DeepL이 번역하지 않음).
+    - marks(영어 쪽 형광펜)는 <m c="범주" i="번호">로 감싼다. DeepL은 이 태그를 대응하는 번역어 쪽으로 옮긴다.
+      보호 구간과 겹치는 표시(약어·참조)는 <x>에 c·i 속성으로 붙인다.
+    """
+    spans: list[list] = [[a, b, "x", None, None] for a, b in (_protect_spans(sentence, acronyms) if masked else [])]
+    for i, (a, b, cat) in enumerate(marks or []):
+        hit = next((sp for sp in spans if not (b <= sp[0] or a >= sp[1])), None)
+        if hit is not None:
+            if hit[3] is None:
+                hit[3], hit[4] = cat, i
+        else:
+            spans.append([a, b, "m", cat, i])
     out, pos = [], 0
-    for a, b in sorted(spans):
-        out += [escape(sentence[pos:a]), f"<x>{escape(sentence[a:b])}</x>"]
+    for a, b, tag, cat, i in sorted(spans):
+        attrs = f' c="{cat}" i="{i}"' if cat else ""
+        out += [escape(sentence[pos:a]), f"<{tag}{attrs}>{escape(sentence[a:b])}</{tag}>"]
         pos = b
     out.append(escape(sentence[pos:]))
     return "".join(out)
+
+
+def protect(sentence: str, acronyms: dict[str, str | None] | None = None) -> str:
+    """보호할 구간만 <x>로 감싸고 나머지는 XML 이스케이프한다."""
+    return to_xml(sentence, acronyms, masked=True)
 
 
 def unprotect(xml_text: str) -> str:
@@ -80,7 +109,31 @@ def unprotect(xml_text: str) -> str:
 
 
 def protected_tokens(xml_text: str) -> list[str]:
-    return [unescape(t) for t in re.findall(r"<x>(.*?)</x>", xml_text)]
+    return [unescape(P.X_TAG.sub("", t)) for t in re.findall(r"<x\b[^>]*>(.*?)</x>", xml_text)]
+
+
+def ko_marks_from_xml(ko_xml: str, plain: str, en_phrases: list[str]) -> list[tuple[int, int, str, str]]:
+    """DeepL 결과의 태그 위치를 후처리된 한국어 문장(plain) 위의 구간으로 바꾼다. 못 찾은 태그는 버린다."""
+    found, cursor = [], 0
+    for m in P.MARK_TAG.finditer(ko_xml):
+        phrase = unescape(P.X_TAG.sub("", m.group("body"))).strip()
+        if not phrase:
+            continue
+        at = plain.find(phrase, cursor)
+        if at < 0:
+            at = plain.find(phrase)
+        if at < 0:
+            continue
+        i = int(m.group("i"))
+        found.append((at, at + len(phrase), m.group("c"), en_phrases[i] if i < len(en_phrases) else ""))
+        cursor = at + len(phrase)
+    found.sort()
+    kept, last = [], -1
+    for sp in found:
+        if sp[0] >= last:
+            kept.append(sp)
+            last = sp[1]
+    return kept
 
 
 def fix_korean(text: str) -> str:
@@ -144,45 +197,57 @@ Caller = Callable[[list[str], str, str], list[str]]
 
 
 def translate(sentences: list[str], acronyms: dict[str, str | None] | None = None, masked: bool = True,
-              api_key: str | None = None, caller: Caller = call_deepl, use_file_cache: bool = True) -> TranslationResult:
-    """문장 목록을 번역한다. 오류가 나도 예외를 올리지 않고 TranslationResult.error에 담는다."""
+              api_key: str | None = None, caller: Caller = call_deepl, use_file_cache: bool = True,
+              marks: list[list[Mark]] | None = None) -> TranslationResult:
+    """문장 목록을 번역한다. 오류가 나도 예외를 올리지 않고 TranslationResult.error에 담는다.
+
+    marks를 주면(문장별 영어 형광펜 구간) 한국어 쪽 형광펜 위치(ko_marks)도 함께 돌려준다.
+    """
     if not sentences:
         return TranslationResult(ko=[], mode="aligned", masked=masked)
-    xmls = [protect(s, acronyms) if masked else escape(s) for s in sentences]
-    tokens = [protected_tokens(x) for x in xmls]
+    marks = marks or [[] for _ in sentences]
+    xmls = [to_xml(s, acronyms, masked, mk) for s, mk in zip(sentences, marks)]
+    tokens = [protected_tokens(x) if masked else [] for x in xmls]
+    en_phrases = [[s[a:b] for a, b, _ in mk] for s, mk in zip(sentences, marks)]
     key = cache_key(xmls, masked)
     cache = _load_cache() if use_file_cache else {}
     if key in cache:
         hit = cache[key]
-        return TranslationResult(ko=hit.get("ko"), mode=hit["mode"], paragraph=hit.get("paragraph"),
-                                 masked=masked, cached=True, protected=tokens)
+        return TranslationResult(ko=hit.get("ko"), mode=hit["mode"], paragraph=hit.get("paragraph"), masked=masked,
+                                 cached=True, protected=tokens,
+                                 ko_marks=[[tuple(x) for x in row] for row in hit.get("ko_marks", [])])
 
     api_key = api_key or load_api_key()
     if not api_key:
         return TranslationResult(ko=None, mode="none", masked=masked, error=NO_KEY_MESSAGE, protected=tokens)
 
+    def finish(raw: list[str]) -> tuple[list[str], list]:
+        ko = [fix_korean(unprotect(r)) for r in raw]
+        return ko, [ko_marks_from_xml(r, k, e) for r, k, e in zip(raw, ko, en_phrases)]
+
+    ko_marks: list = []
     try:
         # 1) 문단 한 번에 + 문장 태그 → 정규식으로 복원
         joined = " ".join(f"<s>{x}</s>" for x in xmls)
         out = caller([joined], api_key, "nonewlines")[0]
         parts = P.SENT_TAG.findall(out)
         if len(parts) == len(xmls):
-            ko, mode, paragraph = [fix_korean(unprotect(p)) for p in parts], "aligned", None
+            (ko, ko_marks), mode, paragraph = finish(parts), "aligned", None
         else:
             # 2) 태그가 어긋나면 문장별 전송(DeepL 재분리 끔)
             outs = caller(xmls, api_key, "0")
             if len(outs) == len(xmls):
-                ko, mode, paragraph = [fix_korean(unprotect(o)) for o in outs], "per_sentence", None
+                (ko, ko_marks), mode, paragraph = finish(outs), "per_sentence", None
             else:
-                # 3) 그래도 어긋나면 문단 단위로만 보여 준다
+                # 3) 그래도 어긋나면 문단 단위로만 보여 준다(형광펜 없음)
                 ko, mode, paragraph = None, "paragraph", fix_korean(unprotect(re.sub(r"</?s>", "", out)))
     except TranslationError as e:
         return TranslationResult(ko=None, mode="none", masked=masked, error=str(e), protected=tokens)
 
     if use_file_cache:
-        cache[key] = {"ko": ko, "mode": mode, "paragraph": paragraph}
+        cache[key] = {"ko": ko, "mode": mode, "paragraph": paragraph, "ko_marks": ko_marks}
         _save_cache(cache)
-    return TranslationResult(ko=ko, mode=mode, paragraph=paragraph, masked=masked, protected=tokens)
+    return TranslationResult(ko=ko, mode=mode, paragraph=paragraph, masked=masked, protected=tokens, ko_marks=ko_marks)
 
 
 def preserved_ratio(result: TranslationResult) -> tuple[int, int]:

@@ -261,7 +261,11 @@ PROTECT_PATTERNS = (URL, MATH, CITE_NUM, CITE_AUTHOR, XREF)
 (1812.10896). 마스킹을 끄면 수치는 '2,000', '1,000만'처럼 표기만 바뀌고 값은 맞았다.
 """
 
-X_TAG = re.compile(r"</?x>")
+X_TAG = re.compile(r"</?(?:x|m)\b[^>]*>")
+"""보호 태그 <x>와 형광펜 태그 <m c=.. i=..>를 모두 지운다."""
+
+MARK_TAG = re.compile(r'<(?P<t>x|m) c="(?P<c>[\w-]+)" i="(?P<i>\d+)">(?P<body>.*?)</(?P=t)>', re.S)
+"""번역 결과에서 형광펜 위치를 복원하는 태그(범주 c, 영어 표시 번호 i)."""
 SENT_TAG = re.compile(r"<s>(.*?)</s>", re.S)
 """문단 번역에서 문장 짝을 복원하는 태그."""
 
