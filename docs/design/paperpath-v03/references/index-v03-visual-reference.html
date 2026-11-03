@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PaperPath — 처음 읽는 영어 논문 도우미</title>
+<style>
+:root {
+  --ink: #182b45;
+  --muted: #65758b;
+  --subtle: #8b98a9;
+  --line: #e3e9f0;
+  --surface: #ffffff;
+  --canvas: #f4f7fa;
+  --navy: #183a5b;
+  --blue: #286b9c;
+  --blue-soft: #eaf3fb;
+  --teal: #218b83;
+  --teal-soft: #e8f6f3;
+  --amber: #a96c17;
+  --amber-soft: #fff5df;
+  --violet: #7657a7;
+  --violet-soft: #f2edfa;
+  --radius: 14px;
+  --shadow: 0 4px 18px rgba(26, 54, 83, .045);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1440px; height: 900px; overflow: hidden; }
+body {
+  background: var(--canvas); color: var(--ink);
+  font-family: Pretendard, "Malgun Gothic", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  height: 68px; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; padding: 0 60px; gap: 42px;
+}
+.brand { display:flex; align-items:center; gap:11px; min-width: 274px; }
+.brand-mark { width:36px; height:36px; border-radius:11px; background:var(--navy); display:grid; place-items:center; color:white; }
+.brand-name { font-size:15px; font-weight:750; letter-spacing:-.35px; }
+.brand-sub { color:var(--muted); font-size:10px; margin-top:3px; letter-spacing:.2px; }
+.nav { display:flex; align-items:center; gap:28px; height:100%; }
+.nav-item { height:100%; display:flex; align-items:center; position:relative; color:#78869a; font-size:13px; font-weight:600; }
+.nav-item.active { color:var(--navy); }
+.nav-item.active:after { content:""; height:2px; background:#2d789f; position:absolute; bottom:0; left:0; right:0; border-radius:2px; }
+.top-right { margin-left:auto; display:flex; align-items:center; gap:12px; color:#78869a; font-size:11px; }
+.status-dot { width:7px; height:7px; background:#36a28d; border-radius:50%; display:inline-block; margin-right:6px; }
+.avatar { width:31px; height:31px; border-radius:50%; background:#edf2f7; display:grid; place-items:center; color:#60758b; font-size:11px; font-weight:700; }
+main { width:1320px; margin:0 auto; padding-top:20px; }
+.intro { height:57px; display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:15px; }
+.eyebrow { color:#68839a; font-size:9px; font-weight:800; letter-spacing:1.55px; margin-bottom:6px; }
+h1 { margin:0; font-size:23px; line-height:1.25; letter-spacing:-.85px; font-weight:760; }
+.intro-desc { font-size:11px; color:var(--muted); margin-top:5px; }
+.example-flag { display:flex; align-items:center; gap:6px; padding:7px 10px; border:1px solid #dfe8ef; border-radius:8px; background:#fbfdff; color:#6e7f91; font-size:10px; margin-bottom:4px; }
+.panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); }
+.input-panel { height:89px; display:flex; align-items:center; padding:14px 16px; gap:15px; }
+.input-leading { width:29px; height:29px; border-radius:9px; background:#eef4f8; color:#53738d; display:grid; place-items:center; flex:none; }
+.input-copy { width:171px; flex:none; }
+.field-label { color:#354a61; font-weight:700; font-size:11px; margin-bottom:5px; }
+.field-hint { color:#8a97a7; font-size:9px; }
+.segmented { display:flex; padding:3px; border:1px solid var(--line); border-radius:9px; background:#f7f9fb; gap:2px; }
+.segment { height:32px; padding:0 12px; display:flex; align-items:center; gap:6px; color:#718196; font-size:10px; font-weight:650; border-radius:7px; }
+.segment.selected { background:white; color:var(--navy); box-shadow:0 1px 3px rgba(20,50,80,.12); }
+.id-field { height:39px; width:250px; border:1px solid #dbe4ec; border-radius:9px; background:#fcfdff; display:flex; align-items:center; padding:0 11px; color:#273d55; font-size:12px; font-weight:650; letter-spacing:.1px; }
+.id-prefix { color:#93a0af; font-weight:500; margin-right:8px; }
+.load-btn { height:39px; padding:0 17px; border:0; border-radius:9px; background:var(--navy); color:#fff; display:flex; align-items:center; gap:8px; font:700 11px inherit; font-size:11px; font-weight:700; letter-spacing:-.1px; }
+.input-divider { width:1px; height:38px; background:var(--line); margin:0 2px; }
+.privacy { flex:1; display:flex; align-items:center; gap:7px; color:#7b8999; font-size:9px; line-height:1.5; }
+.section-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; }
+.section-title { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:760; letter-spacing:-.3px; }
+.section-num { width:20px; height:20px; display:grid; place-items:center; border-radius:6px; background:#edf3f8; color:#54738d; font-size:9px; font-weight:800; }
+.section-note { color:#8390a0; font-size:9px; }
+.skeleton-section { margin-top:16px; }
+.skeleton-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.skeleton-card { min-height:124px; padding:13px 15px 12px; position:relative; overflow:hidden; }
+.skeleton-card:before { content:""; position:absolute; top:0; left:0; bottom:0; width:3px; background:#6c9dbb; }
+.skeleton-card.method:before { background:#3a9c92; }
+.skeleton-card.result:before { background:#8b79b5; }
+.card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.card-kind { display:flex; align-items:center; gap:7px; font-size:10px; font-weight:750; color:#36536d; }
+.kind-dot { width:7px; height:7px; border-radius:50%; background:#6c9dbb; }
+.method .kind-dot { background:#3a9c92; } .result .kind-dot { background:#8b79b5; }
+.confidence { color:#8b98a8; font-size:9px; }
+.skeleton-text { font-size:11px; color:#40536a; line-height:1.62; letter-spacing:-.16px; min-height:38px; }
+.mark-blue { background:#e7f1fb; color:#205d8b; font-weight:750; border-radius:3px; padding:1px 3px; }
+.mark-teal { background:#e5f5f1; color:#18796f; font-weight:750; border-radius:3px; padding:1px 3px; }
+.mark-violet { background:#f0ebf8; color:#7456a2; font-weight:750; border-radius:3px; padding:1px 3px; }
+.reason { display:flex; align-items:center; gap:5px; margin-top:7px; color:#78899a; font-size:9px; }
+.reason svg { color:#8ba0b2; }
+.reading-section { margin-top:15px; }
+.reading-head { height:29px; display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.reading-title { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:760; }
+.reading-tools { display:flex; align-items:center; gap:8px; }
+.count-chip { height:23px; padding:0 8px; border-radius:6px; display:flex; align-items:center; gap:5px; font-size:9px; font-weight:700; }
+.count-chip.blue { color:#25618b; background:var(--blue-soft); }
+.count-chip.amber { color:#986314; background:var(--amber-soft); }
+.count-chip.teal { color:#1f7b73; background:var(--teal-soft); }
+.count-chip.violet { color:#73539d; background:var(--violet-soft); }
+.rule-button { height:27px; padding:0 10px; border:1px solid #dce5ed; border-radius:7px; background:white; color:#536b82; display:flex; align-items:center; gap:6px; font-size:9px; font-weight:700; }
+.reader-grid { display:grid; grid-template-columns:1.13fr .87fr; gap:12px; }
+.reader-card { height:280px; overflow:hidden; }
+.reader-card-head { height:42px; padding:0 15px; border-bottom:1px solid #edf0f4; display:flex; align-items:center; justify-content:space-between; }
+.reader-card-title { display:flex; align-items:center; gap:7px; font-size:11px; font-weight:750; }
+.lang-tag { background:#eff4f8; border-radius:5px; color:#60758b; padding:4px 6px; font-size:8px; font-weight:800; letter-spacing:.35px; }
+.reader-meta { color:#94a0ae; font-size:9px; }
+.text-content { padding:11px 16px 10px; }
+.sentence { display:grid; grid-template-columns:18px 1fr; gap:8px; padding:6px 0; border-bottom:1px solid #f0f3f6; }
+.sentence:last-child { border-bottom:0; }
+.sentence-no { width:18px; height:18px; border-radius:5px; background:#f1f5f8; color:#8090a1; display:grid; place-items:center; font-size:8px; font-weight:750; margin-top:1px; }
+.sentence-text { color:#34485f; font-size:10.5px; line-height:1.58; letter-spacing:-.12px; }
+.abbr { color:#205f90; background:#eaf3fb; border-bottom:1px solid #7ca9ca; font-weight:750; padding:0 2px; border-radius:2px; }
+.hedge { color:#956314; background:#fff4dd; border-bottom:1px solid #d7ac57; font-weight:700; padding:0 2px; border-radius:2px; }
+.confident { color:#1c756d; background:#e8f5f1; font-weight:700; padding:0 2px; border-radius:2px; }
+.reference { color:#73539d; background:#f0ebf8; font-weight:700; padding:0 2px; border-radius:2px; }
+.translation-card { position:relative; }
+.translation-banner { height:27px; padding:0 13px; background:#f3f8fb; display:flex; align-items:center; justify-content:space-between; color:#688096; font-size:9px; }
+.toggle-state { display:flex; align-items:center; gap:5px; color:#21847b; font-weight:700; }
+.toggle { width:22px; height:12px; border-radius:8px; background:#4ca69b; position:relative; }
+.toggle:after { content:""; width:8px; height:8px; border-radius:50%; background:white; position:absolute; right:2px; top:2px; }
+.translation-content { padding:7px 14px; }
+.ko-line { display:grid; grid-template-columns:18px 1fr; gap:8px; padding:7px 0; border-bottom:1px solid #f0f3f6; min-height:42px; }
+.ko-line:last-child { border:0; }
+.ko-no { color:#9aa6b3; font-size:8px; font-weight:750; padding-top:2px; }
+.ko-text { color:#4a5e73; font-size:10px; line-height:1.6; letter-spacing:-.14px; }
+.translation-actions { position:absolute; bottom:0; right:0; left:0; height:36px; background:linear-gradient(0deg,#fff 76%,rgba(255,255,255,0)); display:flex; align-items:flex-end; justify-content:flex-end; padding:0 13px 9px; }
+.compare-btn { display:flex; align-items:center; gap:5px; height:22px; border:1px solid #dce5ec; border-radius:6px; padding:0 8px; background:white; color:#6d7d8d; font-size:8px; font-weight:700; }
+.bottom-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:10px; }
+.mini-panel { min-height:65px; padding:9px 13px; display:flex; align-items:center; gap:12px; }
+.mini-icon { flex:none; width:27px; height:27px; border-radius:8px; background:#f0f4f8; color:#59758d; display:grid; place-items:center; }
+.mini-copy { min-width:0; flex:1; }
+.mini-title { display:flex; align-items:center; gap:7px; font-size:9px; color:#3b5168; font-weight:750; margin-bottom:5px; }
+.mini-desc { color:#7b8a9a; font-size:8.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mini-action { flex:none; border:1px solid #dce5ec; background:#fff; border-radius:6px; color:#5d748a; font-size:8px; font-weight:700; height:25px; padding:0 8px; }
+.rule-snippet { color:#678096; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:8px; background:#f5f8fa; padding:3px 5px; border-radius:4px; }
+.bottom-note { display:flex; align-items:center; justify-content:space-between; padding:9px 2px 0; color:#929eaa; font-size:8px; }
+.bottom-note strong { color:#6e8091; font-weight:700; }
+svg { display:block; }
+/* Small helper text is darkened for AA contrast on light surfaces. */
+:root { --muted:#566b80; --subtle:#66798b; }
+.brand-sub, .top-right, .nav-item { color:#5d7286; }
+.example-flag { color:#596f84; }
+.field-hint { color:#607489; }
+.input-prefix { color:#6d8195; }
+.privacy { color:#5d7285; }
+.section-note, .confidence { color:#60758a; }
+.reason { color:#5c7084; }
+.reader-meta { color:#60758a; }
+.translation-banner { color:#536f86; }
+.ko-no { color:#60758a; }
+.bottom-note { color:#60758a; }
+.bottom-note strong { color:#52697f; }
+
+/* v02 — premium SaaS visual refinement. Layout and content hierarchy remain unchanged. */
+:root {
+  --ink: #14263e;
+  --muted: #52677f;
+  --subtle: #6b7f94;
+  --line: #e2e9f2;
+  --surface: #ffffff;
+  --canvas: #f6f8fc;
+  --navy: #183b60;
+  --blue: #2b6f9f;
+  --blue-soft: #edf5fc;
+  --teal: #21877f;
+  --teal-soft: #eaf7f4;
+  --amber: #9a681d;
+  --amber-soft: #fff7e8;
+  --violet: #7156a2;
+  --violet-soft: #f3effa;
+  --radius: 16px;
+  --shadow: 0 8px 24px rgba(25, 49, 77, .065), 0 1px 2px rgba(25, 49, 77, .035);
+}
+html, body { background: #f6f8fc; }
+body {
+  background:
+    radial-gradient(780px 300px at 88% -8%, rgba(216, 232, 247, .46), transparent 70%),
+    linear-gradient(180deg, #f8fafd 0%, #f4f7fb 100%);
+  color: var(--ink);
+}
+.topbar {
+  background: rgba(255,255,255,.94);
+  border-bottom: 1px solid #e4eaf2;
+  box-shadow: 0 2px 12px rgba(22, 46, 74, .025);
+}
+.brand { gap: 12px; }
+.brand-mark {
+  width: 38px; height: 38px; border-radius: 12px;
+  background: linear-gradient(145deg, #214d75 0%, #142f4f 100%);
+  box-shadow: 0 5px 12px rgba(24, 59, 96, .18), inset 0 1px 0 rgba(255,255,255,.16);
+}
+.brand-name { font-size: 15.5px; letter-spacing: -.45px; color: #172c46; }
+.brand-sub { color: #657b91; font-size: 10px; letter-spacing: .12px; }
+.nav { gap: 30px; }
+.nav-item { color: #718297; font-size: 12.5px; transition: color .18s ease; }
+.nav-item.active { color: #1b456d; font-weight: 750; }
+.nav-item.active:after {
+  height: 3px; background: linear-gradient(90deg, #2d78a8, #5c9ac0);
+  box-shadow: 0 -2px 10px rgba(52, 119, 164, .12);
+}
+.top-right { color: #5f748a; }
+.status-dot { background: #32a28b; box-shadow: 0 0 0 3px rgba(50,162,139,.12); }
+.avatar {
+  width: 32px; height: 32px; color: #41617e;
+  background: linear-gradient(145deg, #f0f5fa, #e5edf5);
+  border: 1px solid #e0e8f1;
+}
+main { padding-top: 21px; }
+.eyebrow { color: #5b7d9b; font-size: 9px; letter-spacing: 1.7px; }
+h1 { color: #172d47; font-size: 24px; letter-spacing: -.95px; }
+.intro-desc { color: #5f7389; font-size: 11.2px; }
+.example-flag {
+  border: 1px solid #dce7f1; border-radius: 9px;
+  background: linear-gradient(135deg, #ffffff, #f6faff);
+  color: #526f89; box-shadow: 0 2px 7px rgba(31,65,97,.035);
+}
+.panel {
+  background: rgba(255,255,255,.97);
+  border: 1px solid #e1e8f1;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.input-panel {
+  background: linear-gradient(105deg, rgba(255,255,255,.99), rgba(250,252,255,.98));
+  border-color: #dfe8f2;
+  box-shadow: 0 8px 24px rgba(25, 49, 77, .055), 0 1px 2px rgba(25, 49, 77, .03);
+}
+.input-leading {
+  width: 32px; height: 32px; border-radius: 10px;
+  color: #406987; background: linear-gradient(145deg, #eff5fb, #e7f0f8);
+  border: 1px solid #e3edf6;
+}
+.field-label { color: #263f5a; font-size: 11.5px; }
+.field-hint { color: #647a90; font-size: 9.2px; }
+.segmented {
+  border-color: #e1e8f0; border-radius: 10px;
+  background: #f4f7fa; padding: 3px;
+}
+.segment { height: 33px; border-radius: 7px; color: #61758b; }
+.segment.selected {
+  color: #1b456d; border: 1px solid #e7edf4;
+  box-shadow: 0 2px 5px rgba(23,54,84,.09);
+}
+.id-field {
+  border-color: #d8e3ee; border-radius: 10px;
+  background: #fbfdff; color: #213d59;
+  box-shadow: inset 0 1px 2px rgba(28,56,84,.025);
+}
+.id-prefix { color: #6d8297; }
+.load-btn {
+  background: linear-gradient(135deg, #214d75 0%, #173958 100%);
+  border-radius: 10px;
+  box-shadow: 0 5px 12px rgba(24,59,96,.17), inset 0 1px 0 rgba(255,255,255,.12);
+}
+.privacy { color: #5e748a; font-size: 9.2px; }
+.section-title, .reading-title { color: #1b304a; }
+.section-num {
+  width: 21px; height: 21px; border-radius: 7px;
+  background: linear-gradient(145deg, #edf4fa, #e5eef7);
+  color: #456987; border: 1px solid #e0eaf3;
+}
+.section-note { color: #627990; }
+.skeleton-section { margin-top: 17px; }
+.skeleton-grid { gap: 13px; }
+.skeleton-card {
+  min-height: 124px; padding: 14px 16px 12px;
+  background: linear-gradient(145deg, #ffffff 0%, #fcfdff 100%);
+  box-shadow: 0 6px 18px rgba(25,49,77,.045), 0 1px 2px rgba(25,49,77,.025);
+}
+.skeleton-card:before { width: 4px; opacity: .88; }
+.skeleton-card.problem:before { background: linear-gradient(180deg, #79a9c9, #4e83aa); }
+.skeleton-card.method:before { background: linear-gradient(180deg, #55aa9f, #25857d); }
+.skeleton-card.result:before { background: linear-gradient(180deg, #9d8ac5, #7560a7); }
+.card-kind { color: #294b68; font-size: 10.2px; }
+.confidence { color: #60768c; font-size: 9.2px; }
+.skeleton-text { color: #354c64; font-size: 11.2px; line-height: 1.65; }
+.mark-blue, .mark-teal, .mark-violet {
+  border-radius: 4px; padding: 2px 4px;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+.mark-blue { background: #e9f3fb; color: #1e5b88; }
+.mark-teal { background: #e7f5f1; color: #176f68; }
+.mark-violet { background: #f0ecf8; color: #6e529c; }
+.reason { color: #5d7288; font-size: 9.2px; }
+.reason svg { color: #66839c; }
+.reading-section { margin-top: 16px; }
+.reading-head { margin-bottom: 9px; }
+.reading-tools { gap: 7px; }
+.count-chip { height: 24px; border-radius: 7px; font-size: 9.2px; }
+.count-chip.blue { color: #225c87; background: #eaf3fb; }
+.count-chip.amber { color: #8f5e13; background: #fff4df; }
+.count-chip.teal { color: #1c756e; background: #e7f5f1; }
+.count-chip.violet { color: #6d5199; background: #f0ebf8; }
+.rule-button {
+  height: 28px; border-radius: 8px; border-color: #dce6ef;
+  color: #42617e; box-shadow: 0 1px 2px rgba(20,48,76,.035);
+}
+.reader-grid { gap: 13px; }
+.reader-card {
+  border-radius: 16px;
+  box-shadow: 0 7px 20px rgba(25,49,77,.05), 0 1px 2px rgba(25,49,77,.025);
+}
+.reader-card-head {
+  background: linear-gradient(180deg, #ffffff, #fbfcfe);
+  border-bottom-color: #e9eef4;
+}
+.reader-card-title { color: #253f5a; }
+.lang-tag {
+  background: #edf3f8; color: #486780; border: 1px solid #e5edf4;
+  border-radius: 6px; padding: 4px 7px;
+}
+.reader-meta { color: #60768b; }
+.text-content { padding: 12px 17px 10px; }
+.sentence { padding: 6.5px 0; border-bottom-color: #edf1f5; }
+.sentence-no {
+  background: #f0f4f8; color: #58728a; border: 1px solid #e8eef4;
+}
+.sentence-text { color: #2e455e; font-size: 10.8px; line-height: 1.62; }
+.abbr, .hedge, .confident, .reference {
+  border-radius: 4px; padding: 1px 3px;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+.abbr { color: #1d5a87; background: #eaf3fb; border-bottom: 1px solid #75a5c8; }
+.hedge { color: #8c5b12; background: #fff4df; border-bottom: 1px solid #d6aa58; }
+.confident { color: #176f68; background: #e7f5f1; }
+.reference { color: #6e5199; background: #f0ebf8; }
+.translation-card { background: linear-gradient(160deg, #ffffff 0%, #fcfdff 100%); }
+.translation-banner {
+  background: linear-gradient(90deg, #f0f6fb, #f7fafc);
+  border-top: 1px solid #f4f7fa; color: #496a86;
+}
+.toggle-state { color: #1d7b72; }
+.toggle { width: 24px; height: 14px; background: #3c9b90; box-shadow: inset 0 1px 2px rgba(0,0,0,.12); }
+.toggle:after { width: 10px; height: 10px; right: 2px; top: 2px; box-shadow: 0 1px 2px rgba(0,0,0,.16); }
+.translation-content { padding: 7px 15px; }
+.ko-line { border-bottom-color: #edf1f5; padding: 7px 0; }
+.ko-no { color: #5f778d; }
+.ko-text { color: #3f566e; font-size: 10.2px; line-height: 1.58; }
+.translation-actions {
+  background: linear-gradient(0deg, #fff 68%, rgba(255,255,255,0));
+  padding-bottom: 8px;
+}
+.compare-btn {
+  height: 23px; border-color: #dce6ef; border-radius: 7px;
+  color: #526d86; background: #fff; font-size: 8.5px;
+  box-shadow: 0 1px 3px rgba(25,49,77,.04);
+}
+.bottom-row { gap: 13px; margin-top: 11px; }
+.mini-panel {
+  min-height: 66px; border-radius: 15px;
+  box-shadow: 0 5px 16px rgba(25,49,77,.04), 0 1px 2px rgba(25,49,77,.02);
+}
+.mini-icon {
+  width: 29px; height: 29px; border-radius: 9px;
+  background: linear-gradient(145deg, #eff5fa, #e8f0f7);
+  color: #4b6c88; border: 1px solid #e4edf5;
+}
+.mini-title { color: #2d4964; font-size: 9.3px; }
+.mini-desc { color: #61778d; font-size: 8.8px; }
+.mini-action {
+  border-color: #dce6ef; border-radius: 7px; color: #46647f;
+  background: linear-gradient(180deg, #fff, #fbfcfe);
+}
+.rule-snippet {
+  color: #4f6e88; background: #f1f5f8;
+  border: 1px solid #e8eef4; border-radius: 5px;
+}
+.bottom-note { color: #5e748a; }
+.bottom-note strong { color: #344f69; }
+
+
+/* v03 — refined product craft: quieter chrome, sharper hierarchy, precise surfaces. */
+:root {
+  --ink:#15283f; --muted:#5c7188; --subtle:#71849a;
+  --line:#e5ebf2; --canvas:#f7f9fc; --navy:#173a5d;
+  --shadow:0 10px 30px rgba(22,48,77,.055), 0 2px 6px rgba(22,48,77,.025);
+}
+body {
+  background:
+    radial-gradient(900px 360px at 86% -14%, rgba(205,224,242,.42), transparent 68%),
+    radial-gradient(640px 260px at 2% 38%, rgba(231,239,248,.42), transparent 72%),
+    #f7f9fc;
+}
+.topbar {
+  height:68px; padding:0 60px; gap:46px;
+  background:rgba(255,255,255,.88);
+  backdrop-filter:blur(18px);
+  border-bottom:1px solid rgba(220,230,240,.9);
+  box-shadow:0 1px 0 rgba(255,255,255,.8), 0 5px 22px rgba(24,49,76,.025);
+}
+.brand-mark {
+  position:relative; isolation:isolate; overflow:hidden;
+  background:linear-gradient(145deg,#244f76 0%,#153451 76%);
+  box-shadow:0 5px 13px rgba(24,59,96,.16), inset 0 1px 0 rgba(255,255,255,.2);
+}
+.brand-mark:after { content:""; position:absolute; z-index:-1; width:30px;height:30px;right:-14px;top:-16px;border-radius:50%;background:rgba(255,255,255,.16); }
+.brand-name { font-size:15.5px; letter-spacing:-.55px; }
+.brand-sub { font-size:9.5px; letter-spacing:.05px; }
+.nav { gap:8px; }
+.nav-item { height:36px; padding:0 13px; border-radius:9px; font-size:12px; transition:background .18s,color .18s; }
+.nav-item.active { background:#f0f5fa; color:#204b70; }
+.nav-item.active:after { height:2px; left:13px; right:13px; bottom:-16px; border-radius:4px; box-shadow:none; }
+.top-right { gap:14px; font-size:10px; }
+.avatar { box-shadow:0 1px 2px rgba(20,48,76,.04); }
+main { padding-top:22px; }
+.eyebrow { font-size:8.5px; letter-spacing:1.9px; color:#6685a0; }
+h1 { font-size:25px; letter-spacing:-1.1px; line-height:1.22; }
+.intro-desc { font-size:11px; color:#64788e; }
+.example-flag { padding:7px 11px; border-radius:10px; background:rgba(255,255,255,.78); box-shadow:0 2px 8px rgba(28,56,84,.025); }
+.panel { border-color:#e2e9f1; box-shadow:0 8px 26px rgba(25,50,78,.045),0 1px 2px rgba(25,50,78,.025); }
+.input-panel { position:relative; overflow:hidden; border-radius:17px; }
+.input-panel:before { content:""; position:absolute; left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#7ba7c8,#3e729a); opacity:.85; }
+.input-leading { border-radius:11px; }
+.field-label { font-size:11.5px; letter-spacing:-.2px; }
+.segmented { background:#f3f6fa; border-color:#e4eaf1; }
+.segment { font-size:10px; }
+.segment.selected { box-shadow:0 2px 5px rgba(25,55,84,.08),0 0 0 1px rgba(221,231,241,.8); }
+.id-field { background:#fff; border-color:#dce5ee; box-shadow:0 1px 2px rgba(20,48,76,.025),inset 0 1px 1px rgba(20,48,76,.015); }
+.load-btn { background:linear-gradient(135deg,#244f76,#173957); box-shadow:0 5px 12px rgba(24,59,96,.15),inset 0 1px 0 rgba(255,255,255,.14); transition:transform .16s,box-shadow .16s; }
+.load-btn:hover { transform:translateY(-1px); box-shadow:0 7px 15px rgba(24,59,96,.2); }
+.section-title,.reading-title { font-size:13.2px; letter-spacing:-.35px; }
+.section-num { border-radius:7px; font-size:8.5px; }
+.section-note { font-size:8.8px; }
+.skeleton-grid { gap:14px; }
+.skeleton-card {
+  border-radius:15px; min-height:124px;
+  box-shadow:0 7px 20px rgba(25,49,77,.04),0 1px 2px rgba(25,49,77,.025);
+  transition:transform .18s,box-shadow .18s,border-color .18s;
+}
+.skeleton-card:hover { transform:translateY(-2px); box-shadow:0 12px 25px rgba(25,49,77,.075),0 2px 5px rgba(25,49,77,.03); border-color:#d6e2ed; }
+.skeleton-card:before { width:3px; }
+.card-head { margin-bottom:9px; }
+.card-kind { font-size:10px; letter-spacing:-.12px; }
+.confidence { font-size:8.7px; letter-spacing:.05px; }
+.skeleton-text { font-size:11px; line-height:1.7; color:#344b63; }
+.reason { margin-top:8px; font-size:8.8px; }
+.reading-head { margin-bottom:10px; }
+.reading-tools { gap:6px; }
+.count-chip { border:1px solid rgba(220,229,238,.75); padding:0 9px; }
+.rule-button,.compare-btn,.mini-action { transition:background .16s,border-color .16s,color .16s,transform .16s; }
+.rule-button:hover,.compare-btn:hover,.mini-action:hover { background:#f6f9fc; border-color:#cbd9e6; color:#244f76; }
+.reader-grid { gap:14px; }
+.reader-card { border-radius:16px; }
+.reader-card-head { background:linear-gradient(180deg,#fff 0%,#fbfcfe 100%); }
+.reader-card-title { font-size:11px; letter-spacing:-.18px; }
+.lang-tag { min-width:27px; text-align:center; letter-spacing:.55px; }
+.text-content { padding-left:18px; padding-right:18px; }
+.sentence { grid-template-columns:19px 1fr; gap:9px; }
+.sentence-no { width:19px;height:19px; font-size:8px; }
+.sentence-text { color:#2d435b; font-size:10.7px; line-height:1.68; }
+.abbr,.hedge,.confident,.reference { padding:1px 3px 2px; }
+.translation-card { background:linear-gradient(150deg,#fff 0%,#fcfdff 100%); }
+.translation-banner { background:linear-gradient(90deg,#f0f6fb 0%,#f7f9fc 100%); }
+.translation-content { padding-left:16px; padding-right:16px; }
+.ko-line { grid-template-columns:19px 1fr; gap:9px; }
+.ko-text { font-size:10px; line-height:1.66; color:#40566d; }
+.translation-actions { background:linear-gradient(0deg,#fff 62%,rgba(255,255,255,0)); }
+.bottom-row { gap:14px; margin-top:12px; }
+.mini-panel { border-radius:15px; padding:10px 14px; transition:transform .18s,box-shadow .18s; }
+.mini-panel:hover { transform:translateY(-1px); box-shadow:0 9px 22px rgba(25,49,77,.065),0 1px 3px rgba(25,49,77,.025); }
+.mini-icon { border-radius:9px; }
+.mini-title { font-size:9.4px; }
+.rule-snippet { font-size:7.8px; }
+.bottom-note { padding-top:10px; font-size:8px; }
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5z"/><path d="M5 4.5v17M9 7h7M9 11h7M9 15h5"/></svg>
+    </div>
+    <div><div class="brand-name">PaperPath</div><div class="brand-sub">처음 읽는 영어 논문 도우미</div></div>
+  </div>
+  <nav class="nav"><div class="nav-item active">논문 읽기</div><div class="nav-item">규칙 탐색</div><div class="nav-item">검증 결과</div></nav>
+  <div class="top-right"><span><i class="status-dot"></i>규칙 엔진 준비됨</span><div class="avatar">PP</div></div>
+</header>
+<main>
+  <section class="intro">
+    <div><div class="eyebrow">ACADEMIC READING WORKSPACE</div><h1>논문을 읽는 길을 먼저 보여드려요.</h1><div class="intro-desc">원문은 그대로, 핵심 문장과 읽기 신호는 한눈에.</div></div>
+    <div class="example-flag"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7h.01"/></svg>화면 예시 데이터 · 실제 논문 아님</div>
+  </section>
+
+  <section class="panel input-panel">
+    <div class="input-leading"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4M11 8v6M8 11h6"/></svg></div>
+    <div class="input-copy"><div class="field-label">분석할 논문 불러오기</div><div class="field-hint">arXiv ID 또는 직접 붙여 넣기</div></div>
+    <div class="segmented"><div class="segment selected"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>arXiv ID</div><div class="segment">텍스트 붙여 넣기</div></div>
+    <div class="id-field"><span class="id-prefix">arXiv:</span>2402.08910</div>
+    <button class="load-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"/></svg>초록 불러오기</button>
+    <div class="input-divider"></div>
+    <div class="privacy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg><span>붙여 넣은 텍스트는 저장하지 않아요.<br>번역 시 DeepL로 전송됨을 안내합니다.</span></div>
+  </section>
+
+  <section class="skeleton-section">
+    <div class="section-head"><div class="section-title"><span class="section-num">01</span>먼저 읽을 3줄 뼈대</div><div class="section-note">원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시</div></div>
+    <div class="skeleton-grid">
+      <article class="panel skeleton-card problem">
+        <div class="card-head"><div class="card-kind"><i class="kind-dot"></i>문제 · Problem</div><span class="confidence">신호 문구로 찾음</span></div>
+        <div class="skeleton-text">…but selecting reliable evidence <span class="mark-blue">remains challenging</span>.</div>
+        <div class="reason"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7h.01"/></svg>어려움을 직접 밝혀 연구 문제를 나타내는 표현</div>
+      </article>
+      <article class="panel skeleton-card method">
+        <div class="card-head"><div class="card-kind"><i class="kind-dot"></i>방법 · Method</div><span class="confidence">신호 문구로 찾음</span></div>
+        <div class="skeleton-text">To address this issue, <span class="mark-teal">we introduce</span> a lightweight reranking module…</div>
+        <div class="reason"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7h.01"/></svg>새로운 접근법을 제안하는 방법 신호</div>
+      </article>
+      <article class="panel skeleton-card result">
+        <div class="card-head"><div class="card-kind"><i class="kind-dot"></i>결과 · Result</div><span class="confidence">신호 문구로 찾음</span></div>
+        <div class="skeleton-text"><span class="mark-violet">Experiments … show</span> that the module improves retrieval precision…</div>
+        <div class="reason"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7h.01"/></svg>실험 결과를 알리는 표현이 포함된 문장</div>
+      </article>
+    </div>
+  </section>
+
+  <section class="reading-section">
+    <div class="reading-head">
+      <div class="reading-title"><span class="section-num">02</span>원문과 번역을 나란히 읽기</div>
+      <div class="reading-tools">
+        <span class="count-chip blue">약어 1</span><span class="count-chip amber">추측·가능성 2</span><span class="count-chip teal">확신 1</span><span class="count-chip violet">참조 1</span>
+        <button class="rule-button"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h16M4 19h16M8 3v4M16 10v4M11 17v4"/></svg>읽기 전용 단계 보기</button>
+      </div>
+    </div>
+    <div class="reader-grid">
+      <article class="panel reader-card">
+        <div class="reader-card-head"><div class="reader-card-title"><span class="lang-tag">EN</span>영어 원문 <span class="reader-meta">· 4문장</span></div><span class="reader-meta">표현에 마우스를 올리면 정의와 규칙 표시</span></div>
+        <div class="text-content">
+          <div class="sentence"><span class="sentence-no">1</span><div class="sentence-text">Retrieval-augmented generation (<span class="abbr">RAG</span>) can ground language models in external documents, but selecting reliable evidence remains challenging.</div></div>
+          <div class="sentence"><span class="sentence-no">2</span><div class="sentence-text">To address this issue, we introduce a lightweight reranking module that scores retrieved passages using contextual relevance.</div></div>
+          <div class="sentence"><span class="sentence-no">3</span><div class="sentence-text">Experiments on three public benchmarks <span class="confident">show</span> that the proposed module <span class="confident">significantly</span> improves retrieval precision by 8.4% compared with the baseline.</div></div>
+          <div class="sentence"><span class="sentence-no">4</span><div class="sentence-text">These findings <span class="hedge">suggest</span> that a compact reranker <span class="hedge">may help</span> smaller models use evidence more consistently <span class="reference">[4]</span>.</div></div>
+        </div>
+      </article>
+      <article class="panel reader-card translation-card">
+        <div class="reader-card-head"><div class="reader-card-title"><span class="lang-tag">KO</span>한국어 번역 <span class="reader-meta">· 문장별 대응</span></div><span class="reader-meta">DeepL · 번역 예시</span></div>
+        <div class="translation-banner"><span>원문 문장과 1:1로 연결</span><span class="toggle-state"><i class="toggle"></i>번역 켜짐</span></div>
+        <div class="translation-content">
+          <div class="ko-line"><span class="ko-no">01</span><div class="ko-text">검색 증강 생성(RAG)은 언어 모델이 외부 문서를 활용하도록 할 수 있지만, 신뢰할 수 있는 근거를 선택하는 일은 여전히 어렵습니다.</div></div>
+          <div class="ko-line"><span class="ko-no">02</span><div class="ko-text">이 문제를 해결하기 위해, 문맥상 관련성을 사용해 검색된 구절의 점수를 매기는 경량 재순위화 모듈을 소개합니다.</div></div>
+          <div class="ko-line"><span class="ko-no">03</span><div class="ko-text">세 가지 공개 벤치마크 실험 결과, 제안된 모듈은 기준 모델보다 검색 정밀도를 유의미하게 8.4% 향상시켰습니다.</div></div>
+          <div class="ko-line"><span class="ko-no">04</span><div class="ko-text">이러한 결과는 소형 재순위화 모델이 더 작은 모델의 근거 활용 일관성을 높이는 데 도움이 될 가능성을 시사합니다 [4].</div></div>
+        </div>
+        <div class="translation-actions"><button class="compare-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 17h16M8 4 4 7l4 3M16 14l4 3-4 3"/></svg>마스킹 끔과 비교</button></div>
+      </article>
+    </div>
+    <div class="bottom-row">
+      <div class="panel mini-panel"><div class="mini-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="18" cy="18" r="3"/></svg></div><div class="mini-copy"><div class="mini-title">탐지된 약어 <span class="rule-snippet">RAG → Retrieval-Augmented Generation</span></div><div class="mini-desc">괄호 안 약어 후보를 찾고, 앞 단어의 첫 글자를 맞춰 풀네임을 확인합니다.</div></div><button class="mini-action">정의 확인</button></div>
+      <div class="panel mini-panel"><div class="mini-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19 10 5l4 9 2-4 4 9"/></svg></div><div class="mini-copy"><div class="mini-title">규칙 근거 <span class="rule-snippet">may / might / could</span></div><div class="mini-desc">추측·가능성 표현을 한 등급으로 표시하고, 가능·허용 의미는 제외합니다.</div></div><button class="mini-action">규칙 보기</button></div>
+    </div>
+    <div class="bottom-note"><span><strong>읽는 길은 정규식이, 판단은 학생이.</strong> 원문은 수정하거나 요약문으로 대체하지 않습니다.</span><span>번역 예시 · 외부 서비스 전송 안내 포함</span></div>
+  </section>
+</main>
+</body>
+</html>
