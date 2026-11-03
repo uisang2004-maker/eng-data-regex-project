@@ -32,9 +32,17 @@ PROTECT_PATTERNS = [
     re.compile(r"\[math\]"),
     *[r.pattern for r in rules.TOKEN_RULES if r.category == "ref"],
     # 수치: 4.2%, 87 %, 0.05, 1,000, 3x
-    re.compile(r"(?<![\w.])\d+(?:,\d{3})*(?:\.\d+)?\s?(?:%|x\b)?"),
+    re.compile(r"(?<![\w.])\d+(?:,\d{3})*(?:\.\d+)?(?:\s?%|x\b)?"),
 ]
 X_TAG = re.compile(r"</?x>")
+# 번역 후처리: DeepL이 보호된 참조 앞에 붙이는 "제"(예: "제Section 5.1") 제거
+KO_FIXES = [(re.compile(r"제\s?(?=(?:Sec(?:tion)?|Table|Fig(?:ure)?|Eq|Appendix|Alg)\b)"), "")]
+
+
+def fix_korean(text: str) -> str:
+    for pat, rep in KO_FIXES:
+        text = pat.sub(rep, text)
+    return text
 
 
 def protect(sentence: str, acronyms: dict[str, str | None]) -> str:
@@ -116,6 +124,6 @@ def translate_sentences(sentences: list[str], acronyms: dict[str, str | None],
     out = []
     for s, x, k in zip(sentences, xmls, keys):
         hit = cache.get(k)
-        out.append({"en": s, "ko": unprotect(hit["ko_xml"]) if hit else None,
+        out.append({"en": s, "ko": fix_korean(unprotect(hit["ko_xml"])) if hit else None,
                     "protected": protected_tokens(x), "cached": k not in [keys[i] for i in missing]})
     return out
