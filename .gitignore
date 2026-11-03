@@ -1,0 +1,22 @@
+# 가상환경·캐시
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 비밀키·환경변수
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# 대용량 원본 데이터 (재현 명령은 README에 기록)
+data/raw/*
+!data/raw/.gitkeep
+!data/raw/README.md
+
+# OS·에디터
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
