@@ -184,12 +184,14 @@ SK_METHOD = re.compile(
     r"\b(?:in this (?:paper|work|study|article),? we"
     r"|we (?:propose|present|introduce|develop|design|describe|investigate|study)"
     r"|our (?:approach|method|model|framework|system|technique)"
-    r"|this (?:paper|work) (?:proposes|presents|introduces))\b",
+    r"|this (?:paper|work) (?:proposes|presents|introduces)"
+    r"|(?:is|are|was|were) (?:\w+ly )?(?:proposed|introduced|presented|developed))\b",
     re.I,
 )
 SK_RESULT = re.compile(
     r"\b(?:results? (?:show|indicate|demonstrate|suggest|reveal)|we (?:find|found|show|observe|demonstrate)"
     r"|experiments?\b[^.]{0,60}?\b(?:show|demonstrate|reveal)s?|outperform\w*"
+    r"|(?:is|are|was|were) (?:\w+ly )?(?:observed|achieved|obtained)"
     r"|achiev\w* (?:an? )?(?:new )?(?:state[- ]of[- ]the[- ]art|improvement|accuracy|f1|bleu)"
     r"|improv\w* (?:by|over|upon))\b"
     r"|\d+(?:\.\d+)?\s?%",
@@ -245,6 +247,53 @@ POSITION_FALLBACK_RULE = Rule(
     toggleable=True,
 )
 
+# ====================================================================== 핵심 내용 밑줄 (형광펜 = 신호, 밑줄 = 내용)
+
+UNDERLINE_MAX_WORDS = 12
+"""밑줄 상한. 샘플에서 '신호 뒤~문장 끝'은 평균 18.8단어였다(2026-11-04)."""
+
+UL_REPORTING_END = re.compile(
+    r"(?:show|shows|showed|find|finds|found|observe|observed|demonstrate|demonstrates|demonstrated"
+    r"|reveal|reveals|indicate|indicates|suggest|suggests)\s*$", re.I)
+"""신호 문구가 보고 동사로 끝나면 그 뒤(that절)가 내용이다."""
+
+UL_CONTRAST_START = re.compile(r"^\s*(?:however|but|yet|unfortunately)\b", re.I)
+"""대조어 신호면 그 뒤가 내용이다."""
+
+UL_CONCESSION_START = re.compile(r"^\s*(?:although|despite|while|though|even though)\b", re.I)
+"""양보절로 시작하면 주절(쉼표 뒤)이 내용이다."""
+
+UL_PASSIVE = re.compile(r"^(?:is|are|was|were)\b", re.I)
+"""수동태 신호('is introduced', 'were observed')면 그 앞의 주어가 내용이다."""
+
+UL_SUBJECT_COMMA = re.compile(r",\s+(?=(?:a|an|the|our|this|these|those|its|their|they|we|it|such|existing|current|most|many)\b)", re.I)
+"""쉼표가 여럿일 때 주어가 시작되는 쉼표를 고른다(삽입절·목록 쉼표 대신)."""
+
+UL_TRAILING_FUNCTION = re.compile(r"(?:\s+(?:the|a|an|of|with|to|and|or|for|in|on|by|at|from|than|compared|as))+\s*$", re.I)
+"""단어 상한에서 잘린 밑줄 끝의 기능어를 떼어 낸다."""
+
+UL_LEADING_SKIP = re.compile(r"^[\s,]*(?:that\b)?[\s,]*", re.I)
+"""밑줄 시작에서 'that'과 쉼표를 건너뛴다."""
+
+UL_STOP = re.compile(r";|\s\(|,?\s(?:while|whereas)\b")
+"""밑줄을 멈추는 경계. 'to'와 'that'(방법의 목적·기능)과 일반 쉼표에서는 멈추지 않는다."""
+
+UL_STOP_WHICH = re.compile(r",\s(?:which|where)\b")
+"""문제·결과 문장에서만 쓰는 추가 경계(덧붙인 설명절)."""
+
+UL_CLAUSE_START = re.compile(r"(?:^|[,;:]\s+(?:but\s+|and\s+)?|\s(?:but|and)\s)")
+"""신호가 내용 안에 있는 경우('... remains challenging') 그 절이 시작되는 위치를 찾는다."""
+
+KO_TRAIL_PARTICLE = re.compile(r"(?<=[가-힣])(?:을|를|에서|으로)$")
+"""한국어 밑줄 끝의 조사를 밑줄 밖으로 뺀다. 명사 끝 글자와 헷갈리는 과·가·이·의(결과·평가·차이·정의)와
+동사·형용사 어미와 헷갈리는 은·는(높은·향상시키는)은 일부러 뺐다."""
+
+KO_WORD_REST = re.compile(r"[가-힣A-Za-z0-9%]*")
+"""DeepL이 밑줄 태그를 단어 중간('향상시키|는')에서 닫으면 단어 끝까지 늘린다."""
+
+KO_NOUN_PARTICLES = frozenset({"가", "이", "을", "를", "의", "에", "와", "과", "도", "로", "만", "에서", "으로", "에게"})
+"""남은 조각이 이 조사들이면 늘리지 않는다('평가|가'는 '평가'에서 멈춤)."""
+
 TOGGLEABLE_RULES = tuple(r for r in (*TOKEN_RULES, POSITION_FALLBACK_RULE) if r.toggleable)
 DEFAULT_ACTIVE_RULES = frozenset(r.name for r in TOGGLEABLE_RULES)
 
@@ -261,8 +310,11 @@ PROTECT_PATTERNS = (URL, MATH, CITE_NUM, CITE_AUTHOR, XREF)
 (1812.10896). 마스킹을 끄면 수치는 '2,000', '1,000만'처럼 표기만 바뀌고 값은 맞았다.
 """
 
-X_TAG = re.compile(r"</?(?:x|m)\b[^>]*>")
-"""보호 태그 <x>와 형광펜 태그 <m c=.. i=..>를 모두 지운다."""
+X_TAG = re.compile(r"</?(?:x|m|u)\b[^>]*>")
+"""보호 태그 <x>, 형광펜 <m>, 밑줄 <u>를 모두 지운다. 짝이 맞지 않는 태그도 지워져 번역문에 글자로 남지 않는다."""
+
+UL_TAG = re.compile(r'<u c="(?P<c>[\w-]+)" i="(?P<i>\d+)">(?P<body>.*?)</u>', re.S)
+"""번역 결과에서 밑줄 위치를 복원하는 태그. 안에 <x>·<m>이 들어 있어도 된다."""
 
 MARK_TAG = re.compile(r'<(?P<t>x|m) c="(?P<c>[\w-]+)" i="(?P<i>\d+)">(?P<body>.*?)</(?P=t)>', re.S)
 """번역 결과에서 형광펜 위치를 복원하는 태그(범주 c, 영어 표시 번호 i)."""

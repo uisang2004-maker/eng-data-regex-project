@@ -165,3 +165,63 @@ def test_ko_marks_survive_file_cache():
     first = T.translate(*args, marks=[[(3, 10, "confident")]], caller=fake, api_key="k")
     second = T.translate(*args, marks=[[(3, 10, "confident")]], caller=fake, api_key="k")
     assert second.cached and second.ko_marks == first.ko_marks == [[(0, 2, "confident", "greatly")]]
+
+
+# ---------------------------------------------------------------- 핵심 내용 밑줄
+
+def test_to_xml_underline_wraps_and_does_not_cut_tags():
+    s = "We introduce a compact RAG reranker [4]."
+    x = T.to_xml(s, {"RAG": "x"}, masked=True, marks=[(23, 26, "abbr")], underline=(13, 27, "method"))
+    # 밑줄 끝(27)이 'reranker' 중간이 아니라 태그 밖에 놓이고, <x>는 <u> 안에 통째로 들어간다
+    assert x.startswith('We introduce <u c="u-method" i="0">a compact <x c="abbr" i="0">RAG</x>')
+    assert x.count("<u ") == 1 and x.count("</u>") == 1
+
+
+def test_ko_underline_picks_longest_piece_and_trims_particle():
+    raw = '우리는 <u c="u-method" i="0">간결한 재순위 지정기를</u> 소개한다<u c="u-method" i="0">.</u>'
+    plain = T.fix_korean(T.unprotect(raw))
+    a, b, kind = T.ko_underline_from_xml(raw, plain)
+    assert plain[a:b] == "간결한 재순위 지정기" and kind == "method"
+
+
+def test_ko_underline_keeps_noun_final_syllables():
+    raw = '<u c="u-result" i="0">성능 평가</u>가 좋아졌다.'
+    plain = T.fix_korean(T.unprotect(raw))
+    a, b, _ = T.ko_underline_from_xml(raw, plain)
+    assert plain[a:b] == "성능 평가"
+
+
+def test_unclosed_tags_do_not_leak_into_text():
+    raw = '모델 <u c="u-result" i="0">높은 정밀도를 <x c="abbr" i="1">BERT</x> 달성합니다.'
+    plain = T.fix_korean(T.unprotect(raw))
+    assert "<" not in plain and T.ko_underline_from_xml(raw, plain) is None
+
+
+def test_translate_returns_ko_underlines():
+    def fake(texts, key, split):
+        return ['<s>그러나 <u c="u-problem" i="0">증거 선별은 여전히 어렵다</u>.</s>']
+
+    r = T.translate(["However, selecting evidence remains hard."], {}, underlines=[(9, 40, "problem")],
+                    caller=fake, api_key="k")
+    a, b, kind = r.ko_underlines[0]
+    assert r.ko[0][a:b] == "증거 선별은 여전히 어렵다" and kind == "problem"
+
+
+def test_ko_underline_extends_to_word_end_without_cutting_endings():
+    raw = '검색 정확도를 <u c="u-result" i="0">8.4%나 크게 향상시키</u>는 것으로 나타났다.'
+    plain = T.fix_korean(T.unprotect(raw))
+    a, b, _ = T.ko_underline_from_xml(raw, plain)
+    assert plain[a:b] == "8.4%나 크게 향상시키는"
+
+
+def test_cache_recomputes_from_raw_without_calling_again():
+    n = {"calls": 0}
+
+    def fake(texts, key, split):
+        n["calls"] += 1
+        return ['<s>그러나 <u c="u-problem" i="0">증거 선별은 여전히 어렵다</u>.</s>']
+
+    args = dict(underlines=[(9, 40, "problem")], caller=fake, api_key="k")
+    T.translate(["However, selecting evidence remains hard."], {}, **args)
+    again = T.translate(["However, selecting evidence remains hard."], {}, **args)
+    assert n["calls"] == 1 and again.cached and again.ko_underlines[0] is not None

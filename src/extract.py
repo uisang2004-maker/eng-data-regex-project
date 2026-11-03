@@ -40,6 +40,7 @@ class SkeletonCard:
     reason: str                   # 카드 아래 한국어 이유
     signal: tuple[int, int] | None = None   # 문장 안의 신호 문구 위치
     rule: str = ""
+    underline: tuple[int, int] | None = None   # 문장 안의 핵심 내용 밑줄 위치(신호 문구로 찾은 카드만)
 
 
 @dataclass
@@ -152,6 +153,68 @@ def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> lis
     return sorted(kept, key=lambda x: x.start)
 
 
+# ---------------------------------------------------------------- 핵심 내용 밑줄
+
+def _cap(s: str, a: int, b: int, stop: list[re.Pattern]) -> tuple[int, int] | None:
+    """[a, b) 구간을 경계에서 멈추고 단어 상한으로 자른 뒤, 2단어 이상이면 돌려준다."""
+    seg = s[a:b]
+    for pat in stop:
+        m = pat.search(seg)
+        if m and m.start() > 0:
+            seg = seg[:m.start()]
+    words = list(re.finditer(r"\S+", seg))
+    if len(words) > P.UNDERLINE_MAX_WORDS:
+        seg = seg[:words[P.UNDERLINE_MAX_WORDS - 1].end()]
+        seg = P.UL_TRAILING_FUNCTION.sub("", seg)   # 상한에서 잘릴 때 'compared with the'처럼 기능어로 끝나지 않게
+    seg = seg.rstrip(" ,.;:")
+    if len(re.findall(r"[A-Za-z0-9]+", seg)) < 2:
+        return None
+    return a, a + len(seg)
+
+
+def _after(s: str, pos: int) -> int:
+    return pos + P.UL_LEADING_SKIP.match(s[pos:]).end()
+
+
+def underline_span(kind: str, s: str, signal: tuple[int, int]) -> tuple[int, int] | None:
+    """신호 문구가 가리키는 핵심 내용 구간. 형광펜은 신호(어떻게 말하나), 밑줄은 내용(무엇을 말하나)."""
+    a, b = signal
+    sig = s[a:b]
+    stop = [P.UL_STOP] if kind == "method" else [P.UL_STOP, P.UL_STOP_WHICH]
+
+    # 수동태: 'X is introduced', 'Y were observed' → 동사 앞 주어
+    if P.UL_PASSIVE.match(sig):
+        head = s[:a]
+        commas = list(P.UL_SUBJECT_COMMA.finditer(head))
+        start = _after(s, commas[-1].end() if commas else (head.rfind(",") + 1 if "," in head else 0))
+        comma = s.find(",", start, a)          # 주어 뒤 삽입절(', when evaluated on X,')은 뺀다
+        return _cap(s, start, comma if comma > 0 else a, [])
+
+    # 양보절로 시작: 'Although X, Y' → 주어가 시작되는 쉼표 뒤의 주절
+    if kind == "problem" and P.UL_CONCESSION_START.match(s):
+        commas = list(P.UL_SUBJECT_COMMA.finditer(s, b))
+        start = commas[-1].end() if commas else (s.rfind(",") + 1 if s.rfind(",") > b else None)
+        return _cap(s, _after(s, start), len(s), stop) if start else None
+
+    # 대조어·보고 동사·제안 동사 뒤: 신호 뒤부터
+    if (kind == "problem" and P.UL_CONTRAST_START.match(sig)) or P.UL_REPORTING_END.search(sig) \
+            or kind == "method":
+        start = b
+        if kind == "method" and re.search(r"\bwe$", sig, re.I):      # 'In this paper, we propose ...' → 동사 건너뛰기
+            m = re.match(r"\s+\w+", s[b:])
+            start = b + (m.end() if m else 0)
+        return _cap(s, _after(s, start), len(s), stop)
+
+    # 신호가 내용 안에 있는 경우('... remains challenging', 'outperforms ...', 'by 8.4%') → 신호가 든 절
+    starts = [m.end() for m in P.UL_CLAUSE_START.finditer(s[:a])]
+    start = starts[-1] if starts else 0
+    end = len(s)
+    m = re.search(r"[,;]\s", s[b:])
+    if m:
+        end = b + m.start()
+    return _cap(s, _after(s, start), end, stop)
+
+
 # ---------------------------------------------------------------- 3줄 뼈대 (P0-2)
 
 def _signal(kind: str, sent: Sentence):
@@ -176,7 +239,8 @@ def select_skeleton(sentences: list[Sentence], use_fallback: bool = True) -> tup
                 continue
             sig = _signal(kind, s)
             if sig and not (kind == "result" and P.PUBLIC_RELEASE.search(s.text)):
-                cards[kind] = SkeletonCard(kind, s.idx, "signal", "신호 문구로 찾음", rule.reason, sig, rule.name)
+                cards[kind] = SkeletonCard(kind, s.idx, "signal", "신호 문구로 찾음", rule.reason, sig, rule.name,
+                                           underline_span(kind, s.text, sig))
                 used.add(s.idx)
                 break
 

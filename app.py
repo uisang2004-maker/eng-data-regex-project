@@ -136,6 +136,10 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-sig-blue { background:#e7f1fb; color:#205d8b; font-weight:750; border-radius:4px; padding:1px 3px; }
 .pp-sig-teal { background:#e5f5f1; color:#18796f; font-weight:750; border-radius:4px; padding:1px 3px; }
 .pp-sig-violet { background:#f0ebf8; color:#7456a2; font-weight:750; border-radius:4px; padding:1px 3px; }
+.pp-sk-ko { margin-top:8px; padding-top:8px; border-top:1px dashed #e3e9f0; font-size:13.5px; color:#4a5e73; line-height:1.65; }
+.pp-u { text-decoration-line: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; text-decoration-color:#6c9dbb; }
+.pp-u.method { text-decoration-color:#3a9c92; } .pp-u.result { text-decoration-color:#8b79b5; }
+.pp-u .pp-m, .pp-u [class^="pp-sig-"] { background: transparent !important; border-bottom: 0 !important; padding: 0; }
 .pp-reason { display:flex; align-items:flex-start; gap:6px; margin-top:10px; color:#5c7084; font-size:12px; line-height:1.5; }
 .pp-limit { color:#60758a; font-size:12px; margin-top:2px; }
 
@@ -266,59 +270,91 @@ def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
-def render_ko(ko: str, ko_marks, active) -> str:
-    """번역문 형광펜. 위치는 DeepL이 옮긴 태그에서 복원한 것이라 툴팁에 '대응 추정'임을 밝힌다."""
-    out, pos = [], 0
+def render_layers(text: str, spans, underline=None) -> str:
+    """형광펜(spans)과 핵심 내용 밑줄(underline)을 함께 그린다.
+
+    spans: [(시작, 끝, CSS 클래스, 툴팁)] — 서로 겹치지 않는다.
+    underline: (시작, 끝, 카드 종류) 또는 None. 형광펜을 자르지 않도록 경계를 넓힌다.
+    밑줄 안의 형광펜은 CSS에서 배경을 빼고 글자색만 남긴다(겹침 소음 줄이기).
+    """
+    spans = sorted(sp for sp in spans if 0 <= sp[0] < sp[1] <= len(text))
+    ua = ub = None
+    if underline and 0 <= underline[0] < underline[1] <= len(text):
+        ua, ub = underline[0], underline[1]
+        for a, b, *_ in spans:
+            if a < ua < b:
+                ua = a
+            if a < ub < b:
+                ub = b
+    cuts = sorted({0, len(text), *(e for sp in spans for e in sp[:2]), *((ua, ub) if ua is not None else ())})
+    out = []
+    for x, y in zip(cuts, cuts[1:]):
+        if x == ua:
+            out.append(f'<span class="pp-u {underline[2]}" title="핵심 내용(밑줄) · 신호 문구가 가리키는 내용">')
+        sp = next((sp for sp in spans if sp[0] == x and sp[1] == y), None)
+        if sp:
+            tip = esc(sp[3])
+            out.append(f'<span class="{sp[2]}" tabindex="0" title="{tip}" data-tip="{tip}" aria-label="{tip}">'
+                       f'{esc(text[x:y])}</span>')
+        else:
+            out.append(esc(text[x:y]))
+        if y == ub:
+            out.append("</span>")
+    return "".join(out)
+
+
+def render_ko(ko: str, ko_marks, active, underline=None) -> str:
+    """번역문 형광펜·밑줄. 위치는 DeepL이 옮긴 태그에서 복원한 것이라 툴팁에 '대응 추정'임을 밝힌다."""
+    spans, last = [], -1
     for a, b, cat, en in ko_marks:
-        if CAT_RULE.get(cat) not in active or a < pos:
-            continue
-        tip = esc(f"{MARK_LABEL[cat]} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)")
-        out += [esc(ko[pos:a]), f'<span class="pp-m {cat}" tabindex="0" title="{tip}" data-tip="{tip}" '
-                                f'aria-label="{tip}">{esc(ko[a:b])}</span>']
-        pos = b
-    out.append(esc(ko[pos:]))
-    return "".join(out)
+        if CAT_RULE.get(cat) in active and a >= last:
+            spans.append((a, b, f"pp-m {cat}", f"{MARK_LABEL[cat]} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)"))
+            last = b
+    return render_layers(ko, spans, underline)
 
 
-def sentence_marks(raw_text: str):
-    """번역에 보낼 문장별 영어 형광펜 구간. 규칙 켜고 끄기와 상관없이 기본 규칙으로 만들어 캐시를 안정시킨다."""
+def card_underlines(a) -> dict[int, tuple[int, int, str]]:
+    """문장 번호 → 그 문장의 핵심 내용 밑줄(문장 안 위치, 카드 종류). 신호 문구로 찾은 카드만."""
+    return {c.sentence_idx: (*c.underline, c.kind) for c in a.skeleton if c.sentence_idx is not None and c.underline}
+
+
+def translation_layers(raw_text: str):
+    """번역에 보낼 문장별 영어 형광펜·밑줄. 규칙 켜고 끄기와 상관없이 기본 규칙으로 만들어 캐시를 안정시킨다."""
     full = analyze(raw_text)
-    return [[(m.start - s.start, m.end - s.start, m.category) for m in full.marks if s.start <= m.start and m.end <= s.end]
-            for s in full.sentences]
+    uls = card_underlines(full)
+    marks = [[(m.start - s.start, m.end - s.start, m.category) for m in full.marks if s.start <= m.start and m.end <= s.end]
+             for s in full.sentences]
+    return marks, [uls.get(s.idx) for s in full.sentences]
 
 
-def render_marked(text: str, start: int, end: int, marks) -> str:
-    out, pos = [], start
-    for m in marks:
-        if m.end <= start or m.start >= end:
-            continue
-        a, b = max(m.start, start), min(m.end, end)
-        out.append(esc(text[pos:a]))
-        tip = esc(f"{MARK_LABEL[m.category]} · {m.tip}")
-        out.append(f'<span class="pp-m {m.category}" tabindex="0" title="{tip}" data-tip="{tip}" '
-                   f'aria-label="{tip}">{esc(text[a:b])}</span>')
-        pos = b
-    out.append(esc(text[pos:end]))
-    return "".join(out)
+def render_marked(text: str, start: int, end: int, marks, underline=None) -> str:
+    """원문 문장(text[start:end]) 렌더링. underline은 문장 안 위치."""
+    spans = [(max(m.start, start) - start, min(m.end, end) - start, f"pp-m {m.category}",
+              f"{MARK_LABEL[m.category]} · {m.tip}") for m in marks if m.end > start and m.start < end]
+    return render_layers(text[start:end], spans, underline)
 
 
-def skeleton_card(card, a) -> str:
+def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
     title, color = KIND_META[card.kind]
     basis_cls = card.basis
+    basis_tip = {"signal": "신호 문구로 찾은 문장이에요. 밑줄은 신호 문구가 가리키는 핵심 내용이에요.",
+                 "position": "신호 문구가 없어 위치로 고른 추정 문장이에요. 근거가 없어 핵심 내용 밑줄은 긋지 않아요.",
+                 "none": "규칙에 맞는 문장을 찾지 못했어요."}[card.basis]
     if card.sentence_idx is None:
         body = f'<div class="pp-sk-missing">{esc(card.label)}</div>'
         basis = BASIS_TEXT["none"]
     else:
         s = a.sentences[card.sentence_idx].text
-        if card.signal:
-            x, y = card.signal
-            inner = f'{esc(s[:x])}<span class="pp-sig-{color}">{esc(s[x:y])}</span>{esc(s[y:])}'
-        else:
-            inner = esc(s)
-        body = f'<div class="pp-sk-text"><span class="pp-sk-no">문장 {card.sentence_idx + 1}</span>{inner}</div>'
+        spans = [(*card.signal, f"pp-sig-{color}", f"신호 문구 · {card.reason}")] if card.signal else []
+        ul = (*card.underline, card.kind) if card.underline else None
+        body = (f'<div class="pp-sk-text"><span class="pp-sk-no">문장 {card.sentence_idx + 1}</span>'
+                f'{render_layers(s, spans, ul)}</div>')
+        if ko:
+            body += f'<div class="pp-sk-ko">{render_layers(ko, [], ko_ul)}</div>'
         basis = card.label
     return (f'<div class="pp-panel pp-card {color}"><div class="pp-card-head"><div class="pp-kind">'
-            f'<span class="pp-kdot"></span>{title}</div><div class="pp-basis {basis_cls}">{esc(basis)}</div></div>'
+            f'<span class="pp-kdot"></span>{title}</div><div class="pp-basis {basis_cls}" title="{esc(basis_tip)}">'
+            f'{esc(basis)}</div></div>'
             f'{body}<div class="pp-reason">{ICON["info"]}<span>{esc(card.reason)}</span></div></div>')
 
 
@@ -451,7 +487,7 @@ def translation_panel(a) -> None:
             if st.button("번역하기", type="primary", key="translate_btn"):
                 with st.spinner("번역하는 중…"):
                     ss.translations[(tkey, True)] = T.translate(sents, a.acronyms, masked=True, use_file_cache=file_cache,
-                                                                marks=sentence_marks(ss.input_text))
+                                                                **dict(zip(("marks", "underlines"), translation_layers(ss.input_text))))
                 st.rerun()
             return
 
@@ -469,13 +505,14 @@ def translation_panel(a) -> None:
         off = ss.translations.get((tkey, False))
         if res.ko is not None:
             marks_ko = res.ko_marks or []
+            uls_ko = res.ko_underlines or []
             rows = []
             for i, ko in enumerate(res.ko):
                 extra = ""
                 if off and off.ko is not None and i < len(off.ko) and off.ko[i] != ko:
                     extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
                 rows.append(f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div>'
-                            f'<div><div class="pp-text">{render_ko(ko, marks_ko[i] if i < len(marks_ko) else [], a.active_rules)}</div>{extra}</div></div>')
+                            f'<div><div class="pp-text">{render_ko(ko, marks_ko[i] if i < len(marks_ko) else [], a.active_rules, uls_ko[i] if i < len(uls_ko) else None)}</div>{extra}</div></div>')
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)
@@ -509,8 +546,12 @@ def reading_page() -> None:
     st.markdown(sec_head("01", "먼저 읽을 3줄 뼈대", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
                 unsafe_allow_html=True)
     cols = st.columns(3)
+    tr = ss.translations.get((text_key(a.text), True))
     for col, card in zip(cols, a.skeleton):
-        col.markdown(skeleton_card(card, a), unsafe_allow_html=True)
+        i = card.sentence_idx
+        ko = tr.ko[i] if tr and tr.ko and i is not None and i < len(tr.ko) else None
+        ko_ul = tr.ko_underlines[i] if ko and tr.ko_underlines and i < len(tr.ko_underlines) else None
+        col.markdown(skeleton_card(card, a, ko, ko_ul), unsafe_allow_html=True)
     if a.limit_idx:
         st.markdown(f'<div class="pp-limit">한계·향후 과제 문장: {", ".join("문장 " + str(i + 1) for i in a.limit_idx)}</div>',
                     unsafe_allow_html=True)
@@ -528,9 +569,10 @@ def reading_page() -> None:
         steps_panel(a)
 
     left, right = st.columns([1.13, 0.87])
+    uls = card_underlines(a)
     with left:
         rows = "".join(f'<div class="pp-sent"><div class="pp-no">{s.idx + 1}</div>'
-                       f'<div class="pp-text">{render_marked(a.text, s.start, s.end, a.marks)}</div></div>'
+                       f'<div class="pp-text">{render_marked(a.text, s.start, s.end, a.marks, uls.get(s.idx))}</div></div>'
                        for s in a.sentences)
         st.markdown(f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
                     f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {len(a.sentences)}문장</span></div>'

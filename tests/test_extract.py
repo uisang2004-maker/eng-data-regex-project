@@ -161,3 +161,55 @@ def test_samples_never_produce_blank_cards():
         for c in analyze(r["abstract"]).skeleton:
             assert c.label and c.reason
             assert (c.sentence_idx is None) == (c.basis == "none")
+
+
+# ---------------------------------------------------------------- 핵심 내용 밑줄
+
+def ul(kind, sentence):
+    from src.extract import underline_span
+    m = {"method": P.SK_METHOD, "problem": P.SK_PROBLEM, "result": P.SK_RESULT}[kind].search(sentence)
+    sp = underline_span(kind, sentence, (m.start(), m.end()))
+    return sentence[sp[0]:sp[1]] if sp else None
+
+
+@pytest.mark.parametrize("kind,sentence,expected", [
+    ("method", "We propose a lightweight architecture that reduces memory overhead.",
+     "a lightweight architecture that reduces memory overhead"),
+    ("method", "We introduce a novel framework to estimate global interest rates.",
+     "a novel framework to estimate global interest rates"),
+    ("method", "In this paper, we propose a pruning method for transformers.", "a pruning method for transformers"),
+    ("method", "In this paper, a lightweight reranking module is introduced.", "a lightweight reranking module"),
+    ("method", "In this work, the proposed model, when evaluated on Benchmark X, is introduced.", "the proposed model"),
+    ("problem", "However, selecting reliable evidence remains challenging.", "selecting reliable evidence remains challenging"),
+    ("problem", "Although existing models, such as BERT and RoBERTa, achieve high accuracy, they suffer from memory overhead.",
+     "they suffer from memory overhead"),
+    ("problem", "Despite recent advances, reliability remains an unresolved issue.", "reliability remains an unresolved issue"),
+    ("result", "Experiments on three public benchmarks show that the proposed module significantly improves retrieval "
+               "precision by 8.4% compared with the baseline.",
+     "the proposed module significantly improves retrieval precision by 8.4%"),
+    ("result", "Significant performance improvements were observed.", "Significant performance improvements"),
+])
+def test_underline_span(kind, sentence, expected):
+    assert ul(kind, sentence) == expected
+
+
+def test_underline_cap_on_long_sentence():
+    got = ul("method", "We propose a novel transformer-based framework that integrates multi-modal contextual "
+                       "embeddings with reinforcement learning to optimize execution plans.")
+    assert len(got.split()) <= P.UNDERLINE_MAX_WORDS and not got.endswith((" with", " the", " to"))
+
+
+def test_fallback_cards_have_no_underline():
+    a = analyze("Speech systems are common in phones. Many users rely on them daily. The system reached 92 points.")
+    assert all(c.underline is None for c in a.skeleton if c.basis != "signal")
+
+
+def test_samples_underline_length():
+    lengths = []
+    for r in load_samples():
+        a = analyze(r["abstract"])
+        for c in a.skeleton:
+            if c.underline:
+                s = a.sentences[c.sentence_idx].text
+                lengths.append(len(s[c.underline[0]:c.underline[1]].split()))
+    assert lengths and max(lengths) <= P.UNDERLINE_MAX_WORDS

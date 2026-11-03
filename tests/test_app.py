@@ -111,3 +111,21 @@ def test_korean_highlights_follow_rules(at):
     text = md_text(at)
     assert "suggest&#x27;에 대응" not in text and "'suggest'에 대응" not in text
     assert "[4]&#x27;에 대응" in text or "'[4]'에 대응" in text
+
+
+def test_cards_show_korean_and_underline(at):
+    import hashlib
+
+    from src.extract import analyze
+    from src.translate import TranslationResult
+
+    a = analyze(at.session_state["input_text"])
+    key = (hashlib.sha256(a.text.encode("utf-8")).hexdigest()[:16], True)
+    ko = [f"번역문 {i}입니다." for i in range(len(a.sentences))]
+    uls = [(0, 3, "problem"), (0, 3, "method"), (0, 3, "result"), None]
+    at.session_state["translations"] = {key: TranslationResult(ko=ko, mode="aligned", ko_underlines=uls,
+                                                               ko_marks=[[] for _ in ko], protected=[[]] * len(ko))}
+    at.run()
+    text = md_text(at)
+    assert 'class="pp-sk-ko"' in text and " 1입니다." in text   # "번역문"은 밑줄 태그로 감싸져 있다
+    assert text.count('class="pp-u method"') >= 2   # 원문 카드·원문 패널·번역 쪽
