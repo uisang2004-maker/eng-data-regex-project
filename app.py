@@ -799,17 +799,20 @@ def engine_name() -> str:
     return "Claude(Anthropic) API" if engine()[0] == "claude" else "DeepL API"
 
 
-def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
-    """실제로 번역 API를 부르는 순간에만 사용 제한을 확인하고 센다(캐시에서 답하면 세지 않음)."""
-    ss = st.session_state
-    chars = sum(T.plain_len(t) for t in texts)     # 태그(<s>·<m>·<u>)를 뺀 글자 수로 센다
-    reason = usage.check(chars, ss.deepl_calls, engine=engine()[0])
-    if reason:
-        raise T.TranslationError(reason)
-    out = engine()[2](texts, key, split)
-    usage.record(chars)
-    ss.deepl_calls += 1            # 엔진과 상관없이 이 화면의 번역 호출 수
-    return out
+class CountingCaller:
+    """번역 API 호출을 세는 감싸개. 긴 글 묶음은 여러 스레드에서 동시에 부르므로 화면 상태(session_state)를
+    건드리지 않고 잠금 아래에서 글자 수·호출 수만 센다(캐시에서 답하면 부르지 않으니 세지 않는다)."""
+
+    def __init__(self, fn):
+        import threading
+        self.fn, self.chars, self.calls, self.lock = fn, 0, 0, threading.Lock()
+
+    def __call__(self, texts: list[str], key: str, split: str) -> list[str]:
+        out = self.fn(texts, key, split)
+        with self.lock:
+            self.chars += sum(T.plain_len(t) for t in texts)     # 태그(<s>·<m>·<u>)를 뺀 글자 수로 센다
+            self.calls += 1
+        return out
 
 
 def ai_glossary(a, rows) -> None:
@@ -835,10 +838,21 @@ def ai_glossary(a, rows) -> None:
 
 
 def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
-    """긴 절은 엔진의 한 번 한도 이하 묶음으로 나눠 번역한다."""
-    name, key, _ = engine()
-    return T.translate_chunked(sents, usage.LIMITS[name].per_request, acronyms=a.acronyms, masked=masked,
-                               use_file_cache=file_cache, api_key=key, caller=limited_caller, engine=name, **layers)
+    """긴 절은 엔진의 한 번 한도 이하 묶음으로 나눠 동시에 번역한다. 사용 제한은 보내기 전에 묶음 전체로 확인한다."""
+    ss = st.session_state
+    name, key, fn = engine()
+    lim = usage.LIMITS[name]
+    sizes = [sum(len(s) + 1 for s in sents[x:y]) for x, y in T.chunk_ranges(sents, lim.per_request)]
+    reason = usage.check_batch(sizes, ss.deepl_calls, engine=name) if key else None
+    if reason:
+        return T.TranslationResult(ko=None, mode="none", masked=masked, error=reason)
+    caller = CountingCaller(fn)
+    res = T.translate_chunked(sents, lim.per_request, acronyms=a.acronyms, masked=masked,
+                              use_file_cache=file_cache, api_key=key, caller=caller, engine=name, **layers)
+    if caller.calls:
+        usage.record(caller.chars)
+        ss.deepl_calls += caller.calls             # 엔진과 상관없이 이 화면의 번역 호출 수
+    return res
 
 
 def ko_html(res, i: int, a, off=None) -> str:

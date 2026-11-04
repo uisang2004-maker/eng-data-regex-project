@@ -53,6 +53,19 @@ def record(chars: int, path: Path | None = None) -> None:
     path.write_text(json.dumps({"date": _today(), "chars": used_today(path) + chars}), encoding="utf-8")
 
 
+def check_batch(chunk_chars: list[int], session_calls: int, path: Path | None = None,
+                engine: str = "deepl") -> str | None:
+    """긴 글을 여러 묶음으로 동시에 보낼 때: 보내기 전에 묶음 전체를 한꺼번에 확인한다."""
+    if not chunk_chars:
+        return None
+    reason = check(max(chunk_chars), session_calls + len(chunk_chars) - 1, path, engine)
+    if reason:
+        return reason
+    if used_today(path) + sum(chunk_chars) > LIMITS[engine].daily:
+        return "오늘 사이트 전체의 번역 한도에 도달했어요. 내일 다시 시도해 주세요. 독해 표시는 그대로 볼 수 있어요."
+    return None
+
+
 def check(chars: int, session_calls: int, path: Path | None = None, engine: str = "deepl") -> str | None:
     """번역해도 되면 None, 안 되면 화면에 보여 줄 한국어 이유."""
     lim = LIMITS[engine]

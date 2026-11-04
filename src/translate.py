@@ -14,7 +14,9 @@ import json
 import os
 import re
 import ssl
+import threading
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -297,15 +299,56 @@ def _claude_one(xml: str, api_key: str, client=None, system: str = CLAUDE_SYSTEM
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
+CLAUDE_NUMBERED_SYSTEM = CLAUDE_SYSTEM.replace(
+    "1. Translate every <s>...</s> segment. Output exactly the same number of <s> segments, in the same order, one Korean\n"
+    "   translation per segment. Never merge, split, drop or add segments.",
+    "1. The input is a list of numbered segments <seg n=\"...\">...</seg>. Return one item per segment with the same n and\n"
+    "   its Korean translation in ko. Never merge, split, drop or add segments.").replace(
+    "5. Output only the translated markup, with nothing before or after it.",
+    "5. In ko, write only the translated markup of that segment.")
+SEG_SCHEMA = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": {
+        "type": "object", "properties": {"n": {"type": "integer"}, "ko": {"type": "string"}},
+        "required": ["n", "ko"], "additionalProperties": False}}},
+    "required": ["items"],
+    "additionalProperties": False,
+}
+PARALLEL = 6              # 동시에 보낼 요청 수(문장별 대체·긴 글 묶음)
+
+
+def _claude_single(t: str, api_key: str, client=None) -> str:
+    got = _claude_one(f"<s>{t}</s>", api_key, client)
+    parts = P.SENT_TAG.findall(got)
+    return parts[0] if len(parts) == 1 else got
+
+
+def _claude_numbered(texts: list[str], api_key: str, client=None) -> list[str]:
+    """문장 짝이 어긋났을 때의 대체: 번호 붙인 문장을 한 번에 보내 JSON(번호, 번역)으로 받는다.
+    그래도 빠진 문장만 한 문장씩, 동시에 보낸다(예전에는 모든 문장을 차례로 보내 몇 분씩 걸렸다)."""
+    body = "\n".join(f'<seg n="{i}">{t}</seg>' for i, t in enumerate(texts))
+    got: dict[int, str] = {}
+    try:
+        raw = _claude_one(body, api_key, client, system=CLAUDE_NUMBERED_SYSTEM,
+                          fmt={"type": "json_schema", "schema": SEG_SCHEMA})
+        for row in json.loads(raw).get("items", []):
+            n, ko = row.get("n"), str(row.get("ko", "")).strip()
+            if isinstance(n, int) and 0 <= n < len(texts) and ko and n not in got:
+                got[n] = ko
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    missing = [i for i in range(len(texts)) if i not in got]
+    if missing:
+        with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
+            for i, ko in zip(missing, pool.map(lambda i: _claude_single(texts[i], api_key, client), missing)):
+                got[i] = ko
+    return [got[i] for i in range(len(texts))]
+
+
 def call_claude(texts: list[str], api_key: str, split_sentences: str, client=None) -> list[str]:
-    """DeepL 호출과 같은 모양. 문단 한 번에(<s> 묶음) 보내고, 문장별 대체일 때는 문장마다 보낸다."""
+    """DeepL 호출과 같은 모양. 문단 한 번에(<s> 묶음) 보내고, 문장별 대체일 때는 번호 붙인 한 번 요청으로 보낸다."""
     if split_sentences == "0":
-        out = []
-        for t in texts:
-            got = _claude_one(f"<s>{t}</s>", api_key, client)
-            parts = P.SENT_TAG.findall(got)
-            out.append(parts[0] if len(parts) == 1 else got)
-        return out
+        return _claude_numbered(texts, api_key, client)
     return [_claude_one(t, api_key, client) for t in texts]
 
 
@@ -328,9 +371,15 @@ def _load_cache() -> dict:
         return {}
 
 
+_CACHE_LOCK = threading.Lock()
+
+
 def _save_cache(cache: dict) -> None:
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+    """긴 글 묶음을 동시에 번역할 때 서로 덮어쓰지 않도록, 잠근 채로 파일 내용과 합쳐 저장한다."""
+    with _CACHE_LOCK:
+        merged = {**_load_cache(), **cache}
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
 
 
 def cache_key(xmls: list[str], masked: bool, engine: str = "deepl") -> str:
@@ -431,8 +480,13 @@ def translate_chunked(sentences: list[str], max_chars: int, marks=None, underlin
     ranges = chunk_ranges(sentences, max_chars)
     if len(ranges) <= 1:
         return translate(sentences, marks=marks, underlines=underlines, **kw)
-    parts = [translate(sentences[a:b], marks=marks[a:b] if marks else None,
-                       underlines=underlines[a:b] if underlines else None, **kw) for a, b in ranges]
+    def one(r):
+        a, b = r
+        return translate(sentences[a:b], marks=marks[a:b] if marks else None,
+                         underlines=underlines[a:b] if underlines else None, **kw)
+
+    with ThreadPoolExecutor(max_workers=min(PARALLEL, len(ranges))) as pool:   # 묶음을 동시에 보낸다(순서는 유지)
+        parts = list(pool.map(one, ranges))
     bad = next((p for p in parts if p.ko is None and p.paragraph is None), None)
     if bad:                                   # 한 묶음이라도 실패하면 그 이유를 보여 준다
         return TranslationResult(ko=None, mode="none", masked=kw.get("masked", True), error=bad.error,

@@ -308,3 +308,46 @@ def test_engine_cache_keys_separate_and_deepl_key_unchanged():
 def test_pick_engine_prefers_claude():
     assert T.pick_engine("c", "d")[0] == "claude"
     assert T.pick_engine(None, "d")[:2] == ("deepl", "d")
+
+
+class FakeNumbered:
+    """번호 붙인 요청(JSON 형식)에는 일부 문장만 답하고, 한 문장 요청에는 <s>로 답한다."""
+
+    def __init__(self, skip=()):
+        from types import SimpleNamespace as NS
+        self.calls, outer = [], self
+
+        class Messages:
+            def create(self, **kw):
+                outer.calls.append(kw)
+                body = kw["messages"][0]["content"]
+                if "format" in kw["output_config"]:
+                    segs = re.findall(r'<seg n="(\d+)">(.*?)</seg>', body)
+                    items = [{"n": int(n), "ko": "KO:" + t} for n, t in segs if int(n) not in skip]
+                    text = __import__("json").dumps({"items": items})
+                else:
+                    text = re.sub(r"<s>", "<s>KO1:", body)
+                return NS(stop_reason="end_turn", content=[NS(type="text", text=text)])
+
+        self.messages = Messages()
+
+
+def test_claude_fallback_uses_one_numbered_request():
+    fc = FakeNumbered()
+    out = T.call_claude(["One.", "Two.", "Three."], "k", "0", client=fc)
+    assert out == ["KO:One.", "KO:Two.", "KO:Three."] and len(fc.calls) == 1   # 예전에는 문장 수만큼 호출
+
+
+def test_claude_fallback_fills_missing_one_by_one():
+    fc = FakeNumbered(skip={1})
+    out = T.call_claude(["One.", "Two.", "Three."], "k", "0", client=fc)
+    assert out == ["KO:One.", "KO1:Two.", "KO:Three."] and len(fc.calls) == 2
+
+
+def test_usage_check_batch(tmp_path):
+    from src import usage
+    path = tmp_path / "u.json"
+    assert usage.check_batch([3900, 3900, 1200], 0, path, engine="claude") is None
+    assert "번까지" in usage.check_batch([100] * 5, 56, path, engine="claude")
+    usage.record(299_000, path)
+    assert "오늘" in usage.check_batch([900, 900], 0, path, engine="claude")
