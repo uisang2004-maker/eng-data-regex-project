@@ -78,14 +78,14 @@ def trim(items: dict, max_bytes: int = MAX_BYTES) -> dict:
     return keep
 
 
-def to_file(items: dict, title: str = "") -> bytes:
-    """결과 파일(B) 내용. 다른 PC에서 '결과 파일 불러오기'로 다시 넣는다."""
+def to_file(items: dict, title: str = "", docs: dict | None = None) -> bytes:
+    """결과 파일(B) 내용. 다른 PC에서 '결과 파일 불러오기'로 다시 넣는다. docs(다시 열 문서)도 함께 담는다."""
     return json.dumps({"format": FORMAT, "title": title, "saved_at": time.strftime("%Y-%m-%d %H:%M"),
-                       "items": items}, ensure_ascii=False).encode("utf-8")
+                       "items": items, "docs": docs or {}}, ensure_ascii=False).encode("utf-8")
 
 
 def from_file(data: bytes) -> dict:
-    """결과 파일 → items. 형식이 다르면 ValueError."""
+    """결과 파일 → items(번역 결과). 형식이 다르면 ValueError. 문서는 docs_from_file."""
     try:
         doc = json.loads(data.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
@@ -93,3 +93,39 @@ def from_file(data: bytes) -> dict:
     if not isinstance(doc, dict) or doc.get("format") != FORMAT or not isinstance(doc.get("items"), dict):
         raise ValueError("PaperPath 결과 파일이 아니에요(형식이 달라요).")
     return doc["items"]
+
+
+def docs_from_file(data: bytes) -> dict:
+    """결과 파일 속 다시 열 문서(예전 파일에는 없을 수 있음). 깨진 문서는 뺀다."""
+    try:
+        doc = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    docs = doc.get("docs") if isinstance(doc, dict) else None
+    return {k: v for k, v in (docs or {}).items() if valid_doc(v)} if isinstance(docs, dict) else {}
+
+
+# ---------------------------------------------------------------- 다시 열 문서(사용자 브라우저에만)
+
+MAX_DOCS = 30
+
+
+def text_hash(text: str) -> str:
+    """app.text_key와 같은 글 해시(번역 결과를 찾는 열쇠)."""
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def doc_record(kind: str, title: str, sections: list[dict], extra: dict | None = None,
+               now: float | None = None) -> dict:
+    """다시 열 문서: 종류(pdf·arxiv·paste), 제목, 절 목록 [{title, text, subheads}].
+    PDF 파일과 표·그림 이미지는 담지 않는다(크고, 같은 PDF를 다시 넣으면 다시 만든다)."""
+    body = "\x1f".join(s["text"] for s in sections)
+    return {"id": text_hash(kind + "\x1f" + body), "kind": kind, "title": title[:200], "ts": now or time.time(),
+            "sections": [{"title": s["title"], "text": s["text"], "subheads": list(s.get("subheads") or [])}
+                         for s in sections], **(extra or {})}
+
+
+def valid_doc(rec) -> bool:
+    return (isinstance(rec, dict) and isinstance(rec.get("sections"), list) and rec.get("kind") in ("pdf", "arxiv", "paste")
+            and all(isinstance(s, dict) and isinstance(s.get("text"), str) for s in rec["sections"]))

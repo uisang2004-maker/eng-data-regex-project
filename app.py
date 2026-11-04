@@ -7,6 +7,7 @@
 import hashlib
 import html
 import re
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -21,7 +22,7 @@ from src import glossary as G
 from src.explain import MAX_TERMS, explain_terms
 from src.extract import ROLE_ORDER, analyze
 from src.pdf_text import PdfError, extract as extract_pdf
-from src.sections import PAGES as PAPER_PAGES, paper_pages, split_paper
+from src.sections import PAGES as PAPER_PAGES, Paper, Section, paper_pages, split_paper
 from src.tables import find_figures, find_tables, first_mentions
 from src import saved as SV
 
@@ -253,6 +254,9 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* 저장된 문서 목록 */
+.pp-doc { font-size:13.5px; color:#152c49; line-height:1.4; }
+
 /* 브라우저 저장 컴포넌트(보이지 않음) */
 .st-key-browser_store_box { position:absolute; height:0; overflow:hidden; margin:0; padding:0; }
 
@@ -362,6 +366,9 @@ def init_state() -> None:
     ss.setdefault("browser_ver", 0)           # 브라우저 저장 요청 번호(바뀔 때만 컴포넌트가 저장한다)
     ss.setdefault("browser_loaded", False)    # 이 화면을 연 뒤 브라우저에 저장된 결과를 불러왔는지
     ss.setdefault("browser_keys", set())      # 지금 이 브라우저에 저장돼 있는 글 해시(화면 표시용)
+    ss.setdefault("browser_docs", {})         # 이 브라우저에 저장된 '다시 열 문서' {id: 기록}(src.saved.doc_record)
+    ss.setdefault("docs_pending", {})         # 다음 실행에 브라우저에 저장할 문서
+    ss.setdefault("docs_delete", [])          # 다음 실행에 브라우저에서 지울 문서 id
 
 
 @st.cache_resource
@@ -431,7 +438,7 @@ def loaded_bar() -> None:
                     f'{esc(source_flag())}</div>', unsafe_allow_html=True)
         ss = st.session_state
         items = SV.pack_items(ss.translations, ss.ai_gloss)
-        c3.download_button("결과 파일 내려받기", SV.to_file(items, ss.source.get("title", "")),
+        c3.download_button("결과 파일 내려받기", SV.to_file(items, ss.source.get("title", ""), ss.browser_docs),
                            file_name="paperpath_results.json", mime="application/json", key="saved_dl",
                            icon=":material/download:", use_container_width=True, disabled=not items,
                            help="번역·뜻 풀이 결과를 파일로 받아요. 다른 PC에서 '결과 파일 불러오기'로 넣으면 다시 번역하지 않아요.")
@@ -443,14 +450,95 @@ def saved_panel() -> None:
     """입력 칸 아래: 이 브라우저에 저장된 결과 수, 지우기(A), 결과 파일 불러오기(B)."""
     ss = st.session_state
     n = len(ss.browser_keys)
-    with st.expander(f"저장된 번역 · 이 브라우저에 {n}개 글" if n else "저장된 번역 · 결과 파일 불러오기"):
-        st.caption("번역·단어 뜻 풀이 결과는 이 브라우저에 자동으로 저장돼요(서버에는 저장하지 않음). 같은 PDF·글을 다시 넣으면 "
-                   "API를 다시 부르지 않고 저장된 번역으로 바로 열려요. 다른 PC에서는 결과 파일을 불러오세요.")
+    docs = sorted(ss.browser_docs.values(), key=lambda d: -d.get("ts", 0))
+    label = f"저장된 문서 {len(docs)}개 · 번역된 글 {n}개" if docs or n else "저장된 문서 · 결과 파일 불러오기"
+    with st.expander(label, expanded=bool(docs)):
+        st.caption("읽은 문서와 번역·뜻 풀이 결과는 이 브라우저에만 저장돼요(서버에는 저장하지 않음). '다시 열기'를 누르면 "
+                   "PDF를 다시 넣지 않아도 바로 열리고, 번역한 부분은 API 없이 보여요. 다른 PC에서는 결과 파일을 불러오세요.")
+        for d in docs[:SV.MAX_DOCS]:
+            done, total = doc_progress(d)
+            when = time.strftime("%m/%d %H:%M", time.localtime(d.get("ts", 0)))
+            kind = {"pdf": "PDF", "arxiv": "arXiv", "paste": "붙여 넣은 글"}[d["kind"]]
+            c1, c2, c3 = st.columns([5, 1.1, 0.7], vertical_alignment="center")
+            c1.markdown(f'<div class="pp-doc"><b>{esc(d.get("title") or "제목 없음")[:90]}</b>'
+                        f'<div class="pp-meta">{kind} · {when} · 번역 {done}/{total}쪽</div></div>', unsafe_allow_html=True)
+            c2.button("다시 열기", key=f"doc_open_{d['id']}", on_click=open_doc, args=(d["id"],),
+                      type="primary" if done else "secondary", use_container_width=True)
+            c3.button("삭제", key=f"doc_del_{d['id']}", on_click=delete_doc, args=(d["id"],), type="tertiary",
+                      use_container_width=True)
         st.file_uploader("결과 파일 불러오기(.json)", type=["json"], key="saved_file", on_change=on_saved_upload)
         if ss.get("saved_msg"):
             st.success(ss.saved_msg)
         if n:
             st.button("이 브라우저에 저장된 번역 모두 지우기", key="saved_clear", type="tertiary", on_click=clear_browser)
+
+
+def remember_doc(rec: dict) -> None:
+    """읽은 문서를 '저장된 문서'에 넣는다(다음 실행에서 브라우저에 저장)."""
+    ss = st.session_state
+    ss.browser_docs[rec["id"]] = rec
+    ss.docs_pending[rec["id"]] = rec
+
+
+def doc_texts(rec: dict) -> list[str]:
+    """문서를 열었을 때 읽게 되는 글들(PDF면 초록·본문 절마다·결론 묶음). 번역이 저장돼 있는지 세는 데 쓴다."""
+    if rec["kind"] != "pdf":
+        return [s["text"] for s in rec["sections"]]
+    paper = paper_from_doc(rec)
+    out = []
+    for page, ids in paper_pages(paper).items():
+        if page == "본문":
+            out += [paper.sections[i].text for i in ids]
+        else:
+            out.append("\n\n".join(paper.sections[i].text for i in ids))
+    return out
+
+
+def doc_progress(rec: dict) -> tuple[int, int]:
+    texts = doc_texts(rec)
+    ss = st.session_state
+    return sum((SV.text_hash(t), True) in ss.translations for t in texts), len(texts)
+
+
+def paper_from_doc(rec: dict) -> Paper:
+    return Paper(title=rec.get("title", ""), notes=list(rec.get("notes") or []),
+                 sections=[Section(s.get("title", ""), text=s["text"], subheads=list(s.get("subheads") or []))
+                           for s in rec["sections"]])
+
+
+def open_doc(doc_id: str) -> None:
+    """저장된 문서 다시 열기: PDF 없이 절 글자로 다시 만든다. 표·그림 이미지는 PDF를 다시 넣어야 보인다."""
+    ss = st.session_state
+    rec = ss.browser_docs.get(doc_id)
+    if not rec:
+        return
+    rec = {**rec, "ts": time.time()}
+    remember_doc(rec)                      # 최근에 연 문서가 위로 오게
+    ss.input_error = None
+    ss.paper_tables, ss.paper_figures = [], []
+    if rec["kind"] == "pdf":
+        paper = paper_from_doc(rec)
+        if "표·그림은 PDF를 다시 넣으면 보여요." not in paper.notes:
+            paper.notes.append("표·그림은 PDF를 다시 넣으면 보여요.")
+        ss.paper = paper
+        ss.paper_cur, ss.body_cur = PAPER_PAGES[0], 0
+        for k in ("paper_page", "section_pick"):
+            ss.pop(k, None)
+        ss.source = {"kind": "pdf", "title": paper.title}
+        set_view()
+    else:
+        ss.paper = None
+        ss.input_text = rec["sections"][0]["text"]
+        ss.source = ({"kind": "arxiv", "id": rec.get("arxiv_id", ""), "title": rec.get("title", "")}
+                     if rec["kind"] == "arxiv" else {"kind": "paste"})
+    ss.show_input = False
+
+
+def delete_doc(doc_id: str) -> None:
+    ss = st.session_state
+    ss.browser_docs.pop(doc_id, None)
+    ss.docs_pending.pop(doc_id, None)
+    ss.docs_delete.append(doc_id)
 
 
 def on_saved_upload() -> None:
@@ -467,9 +555,13 @@ def on_saved_upload() -> None:
         return
     ss.translations.update(tr)
     ss.ai_gloss.update(gl)
+    docs = SV.docs_from_file(f.getvalue())
+    for rec in docs.values():
+        remember_doc(rec)
     ss.input_error = None
     n = len({k for k, _ in tr} | set(gl))
-    ss.saved_msg = f"결과 {n}개 글을 불러왔어요. 같은 PDF·글을 넣으면 저장된 번역으로 바로 열려요."
+    ss.saved_msg = (f"결과 {n}개 글과 문서 {len(docs)}개를 불러왔어요. 아래 '다시 열기'를 누르거나 같은 PDF를 넣으면 "
+                    "저장된 번역으로 바로 열려요.")
 
 
 def clear_browser() -> None:
@@ -488,11 +580,16 @@ def browser_sync() -> None:
         ss.saved_sig = {k: SV.signature(v) for k, v in items.items()}
         ss.browser_keys = set()
     pending = {k: v for k, v in items.items() if ss.saved_sig.get(k) != SV.signature(v)}
-    if pending or clear:
+    if clear:
+        ss.browser_docs, ss.docs_pending = {}, {}
+    docs, deletes = ss.docs_pending, ss.docs_delete
+    if pending or clear or docs or deletes:
         ss.browser_ver += 1
     with st.container(key="browser_store_box"):
-        value = _browser_store(save=pending or None, clear=clear, ver=str(ss.browser_ver), max=SV.MAX_BYTES,
+        value = _browser_store(save=pending or None, save_docs=docs or None, delete_docs=deletes or None, clear=clear,
+                               ver=str(ss.browser_ver), max=SV.MAX_BYTES, max_docs=SV.MAX_DOCS,
                                key="browser_store", default=None)
+    ss.docs_pending, ss.docs_delete = {}, []
     for k, v in pending.items():
         ss.saved_sig[k] = SV.signature(v)
         ss.browser_keys.add(k)
@@ -500,6 +597,9 @@ def browser_sync() -> None:
         ss.browser_loaded = True
         stored = value.get("items") or {}
         ss.browser_keys |= set(stored)
+        for k, rec in (value.get("docs") or {}).items():
+            if SV.valid_doc(rec):
+                ss.browser_docs.setdefault(k, rec)
         tr, gl = SV.unpack_items(stored)
         for k, r in tr.items():
             ss.translations.setdefault(k, r)
@@ -548,6 +648,9 @@ def load_pdf(data: bytes, name: str) -> str | None:
     ss.source = {"kind": "pdf", "title": paper.title}
     set_view()
     ss.show_input = False
+    remember_doc(SV.doc_record("pdf", paper.title or name,
+                               [{"title": s.title, "text": s.text, "subheads": s.subheads} for s in paper.sections],
+                               {"notes": paper.notes}))
     return None
 
 
@@ -894,7 +997,7 @@ def source_flag() -> str:
     if src["kind"] == "arxiv":
         return f"arXiv {src['id']} · {src.get('title', '')[:40]} · 메타데이터 CC0"
     if src["kind"] == "pdf":
-        return f"PDF · {src.get('title', '')[:36]} · {src.get('section', '')} · 파일은 저장하지 않음"
+        return f"PDF · {src.get('title', '')[:36]} · {src.get('section', '')} · 서버에 저장하지 않음"
     return "붙여 넣은 텍스트 · 앱에 저장하지 않음"
 
 
@@ -910,7 +1013,7 @@ def input_panel() -> None:
         with c2:
             mode = st.segmented_control("입력 방식", MODES, key="input_mode", label_visibility="collapsed") or M_PDF
         c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>올린 파일과 붙여 넣은 텍스트는 서버에 저장하지 않아요. '
-                    f'번역 결과는 이 브라우저에만 저장돼요.<br>번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>',
+                    f'읽은 문서와 번역 결과는 이 브라우저에만 저장돼요.<br>번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>',
                     unsafe_allow_html=True)
         clicked = False
         if mode == M_PDF:
@@ -947,6 +1050,8 @@ def input_panel() -> None:
                         ss.source = {"kind": "arxiv", "id": row["id"], "title": row["title"]}
                         ss.paper = None
                         ss.show_input = False
+                        remember_doc(SV.doc_record("arxiv", row["title"], [{"title": "Abstract", "text": row["abstract"]}],
+                                                   {"arxiv_id": row["id"]}))
                     except ArxivError as e:
                         ss.input_error = str(e)
             else:
@@ -963,6 +1068,8 @@ def input_panel() -> None:
                     ss.source = {"kind": "paste"}
                     ss.paper = None
                     ss.show_input = False
+                    first = txt.split(".")[0][:60]
+                    remember_doc(SV.doc_record("paste", f"붙여 넣은 글 · {first}", [{"title": "붙여 넣은 글", "text": txt}]))
             if not ss.input_error:
                 st.rerun()                 # 위쪽 출처 표시까지 새 글 기준으로 다시 그린다
         if ss.input_error:

@@ -52,3 +52,19 @@ def test_trim_drops_oldest_first():
 def test_broken_items_are_skipped():
     t, g = SV.unpack_items({"a": {"t": {"1": {"nonsense": 1}}}, "b": "x", "c": {"g": {"w": "뜻"}}})
     assert t == {} and g == {"c": {"w": "뜻"}}
+
+
+def test_doc_record_is_stable_and_valid():
+    secs = [{"title": "Abstract", "text": "We propose X."}, {"title": "1 Introduction", "text": "X is new.", "subheads": []}]
+    a = SV.doc_record("pdf", "Paper", secs, {"notes": ["n"]}, now=1)
+    b = SV.doc_record("pdf", "Paper", secs, now=2)
+    assert a["id"] == b["id"] and SV.valid_doc(a) and a["notes"] == ["n"]
+    assert not SV.valid_doc({"kind": "pdf", "sections": [{"title": "x"}]})        # 글이 없는 절
+    assert SV.text_hash("abc") == SV.text_hash("abc") and len(SV.text_hash("abc")) == 16
+
+
+def test_file_carries_documents():
+    rec = SV.doc_record("paste", "글", [{"title": "붙여 넣은 글", "text": "We test."}])
+    data = SV.to_file({}, "t", {rec["id"]: rec, "bad": {"kind": "x"}})
+    assert set(SV.docs_from_file(data)) == {rec["id"]}
+    assert SV.docs_from_file(b"{}") == {} and SV.docs_from_file(b"not json") == {}

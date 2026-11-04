@@ -3,8 +3,9 @@
 <head><meta charset="utf-8"></head>
 <body style="margin:0">
 <script>
-// PaperPath 브라우저 저장: 번역·뜻 풀이 결과를 이 브라우저의 localStorage에 둔다(서버로 보내지 않음).
-// Streamlit 컴포넌트 규약(postMessage)만 직접 쓴다. args: {save: {글 해시: 항목}, clear: bool, ver: 문자열, max: 바이트}
+// PaperPath 브라우저 저장: 번역·뜻 풀이 결과(items)와 다시 열 문서(docs)를 이 브라우저의 localStorage에 둔다(서버로 보내지 않음).
+// Streamlit 컴포넌트 규약(postMessage)만 직접 쓴다.
+// args: {save: {글 해시: 항목}, save_docs: {문서 id: 문서}, delete_docs: [문서 id], clear: bool, ver: 문자열, max: 바이트, max_docs: 개수}
 const KEY = "paperpath-saved-v1";
 let lastVer = null, sent = false;
 
@@ -12,20 +13,27 @@ function post(type, extra) {
   window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, extra || {}), "*");
 }
 function read() {
-  try { const s = JSON.parse(localStorage.getItem(KEY) || "{}"); return (s && s.items) ? s : { items: {} }; }
-  catch (e) { return { items: {} }; }
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY) || "{}") || {};
+    return { items: s.items || {}, docs: s.docs || {} };
+  } catch (e) { return { items: {}, docs: {} }; }
 }
 function size(obj) { return new Blob([JSON.stringify(obj)]).size; }
-function write(store, max) {
-  // 크기 상한이나 저장 공간을 넘으면 오래된 글부터 뺀다
-  const keys = Object.keys(store.items).sort((a, b) => (store.items[a].ts || 0) - (store.items[b].ts || 0));
-  while (keys.length && size(store) > max) delete store.items[keys.shift()];
+function oldest(map) { return Object.keys(map).sort((a, b) => (map[a].ts || 0) - (map[b].ts || 0)); }
+function write(store, max, maxDocs) {
+  // 문서 수 상한, 크기 상한, 저장 공간을 넘으면 오래된 것부터 뺀다(번역 결과 먼저, 그다음 문서)
+  const dk = oldest(store.docs);
+  while (dk.length > maxDocs) delete store.docs[dk.shift()];
+  const ik = oldest(store.items);
+  const dropOne = () => {
+    if (ik.length) { delete store.items[ik.shift()]; return true; }
+    if (dk.length) { delete store.docs[dk.shift()]; return true; }
+    return false;
+  };
+  while (size(store) > max && dropOne()) {}
   for (;;) {
     try { localStorage.setItem(KEY, JSON.stringify(store)); return true; }
-    catch (e) {
-      if (!keys.length) return false;
-      delete store.items[keys.shift()];
-    }
+    catch (e) { if (!dropOne()) return false; }
   }
 }
 
@@ -37,13 +45,17 @@ window.addEventListener("message", function (ev) {
   let ok = true;
   if (a.ver !== lastVer) {
     lastVer = a.ver;
-    if (a.clear) store = { items: {} };
-    if (a.save) for (const k in a.save) store.items[k] = a.save[k];
-    if (a.clear || (a.save && Object.keys(a.save).length)) ok = write(store, a.max || 3500000);
+    let changed = false;
+    if (a.clear) { store = { items: {}, docs: {} }; changed = true; }
+    if (a.save) for (const k in a.save) { store.items[k] = a.save[k]; changed = true; }
+    if (a.save_docs) for (const k in a.save_docs) { store.docs[k] = a.save_docs[k]; changed = true; }
+    if (a.delete_docs) for (const k of a.delete_docs) { delete store.docs[k]; changed = true; }
+    if (changed) ok = write(store, a.max || 3500000, a.max_docs || 30);
   }
   if (!sent || a.clear) {
     sent = true;
-    post("streamlit:setComponentValue", { value: { items: store.items, bytes: size(store), ok: ok }, dataType: "json" });
+    post("streamlit:setComponentValue",
+         { value: { items: store.items, docs: store.docs, bytes: size(store), ok: ok }, dataType: "json" });
   }
 });
 post("streamlit:componentReady", { apiVersion: 1 });

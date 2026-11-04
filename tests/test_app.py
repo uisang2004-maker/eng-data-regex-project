@@ -302,3 +302,31 @@ def test_tables_also_appear_in_korean_translation(at):
     at.session_state["read_mode"] = "ko"
     at.run()
     assert "<b>표 1</b>" in "\n".join(m.value for m in at.markdown)
+
+
+def test_reopen_saved_pdf_document_without_file(blank):
+    import hashlib
+
+    from src import saved as SV
+    from src.translate import TranslationResult
+
+    secs = [{"title": "Abstract", "text": "We propose a small reranker. It helps retrieval."},
+            {"title": "1 Introduction", "text": "Retrieval is hard. We study it."},
+            {"title": "2 Conclusion", "text": "We showed gains."}]
+    rec = SV.doc_record("pdf", "A Tiny Paper", secs)
+    abstract_key = hashlib.sha256(secs[0]["text"].encode("utf-8")).hexdigest()[:16]
+    blank.session_state["browser_docs"] = {rec["id"]: rec}
+    blank.session_state["translations"] = {(abstract_key, True): TranslationResult(
+        ko=["우리는 작은 재순위 모델을 제안한다.", "검색에 도움이 된다."], mode="aligned", ko_marks=[[], []], protected=[[], []])}
+    blank.run()
+    text = "\n".join(m.value for m in blank.markdown)
+    assert "A Tiny Paper" in text and "번역 1/3쪽" in text          # 초록만 번역돼 있음(초록·본문 1·결론)
+    blank.button(key=f"doc_open_{rec['id']}").click().run()
+    assert not blank.exception
+    ss = blank.session_state
+    assert ss["source"]["kind"] == "pdf" and ss["input_text"] == secs[0]["text"] and not ss["show_input"]
+    out = "\n".join(m.value for m in blank.markdown)
+    assert "우리는 작은 재순위 모델을 제안한다." in out and "표·그림은 PDF를 다시 넣으면 보여요." in out
+    blank.button(key="reinput_btn").click().run()
+    blank.button(key=f"doc_del_{rec['id']}").click().run()
+    assert rec["id"] not in blank.session_state["browser_docs"]
