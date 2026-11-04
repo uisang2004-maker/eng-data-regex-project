@@ -9,15 +9,31 @@ APP = str(Path(__file__).resolve().parents[1] / "app.py")
 
 
 @pytest.fixture
-def at():
+def blank():
     app = AppTest.from_file(APP, default_timeout=30)
     app.run()
     assert not app.exception, app.exception
     return app
 
 
+@pytest.fixture
+def at(blank):
+    """예시 문단을 불러온 화면."""
+    blank.button(key="demo_btn").click().run()
+    assert not blank.exception, blank.exception
+    return blank
+
+
 def md_text(at):
     return "\n".join(m.value for m in at.markdown)
+
+
+def test_start_screen_hides_results_until_input(blank):
+    text = "\n".join(m.value for m in blank.markdown if not m.value.lstrip().startswith("<style"))
+    assert "끌어다 놓으세요" in text and "논문 넣기" in text
+    assert 'class="pp-flow"' not in text and "pp-reader-title" not in text and "3줄 뼈대 ·" not in text
+    assert blank.session_state["input_mode"] == "논문 PDF"
+    assert not any(b.label == "번역하기" for b in blank.button)
 
 
 def test_first_screen_shows_demo_skeleton_and_flag(at):

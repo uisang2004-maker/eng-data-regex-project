@@ -20,7 +20,8 @@ from src.pdf_text import PdfError, extract as extract_pdf
 from src.sections import split_paper
 
 PAGES = ("논문 읽기", "규칙 탐색", "검증 결과")
-MODES = ("arXiv ID", "텍스트 붙여 넣기", "논문 PDF")
+MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
+M_PDF, M_ARXIV, M_PASTE = MODES
 MAX_PASTE = 20000
 MAX_PDF_MB = 20
 
@@ -216,6 +217,21 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* PDF 끌어다 놓기 칸 */
+.st-key-pdf_drop { border:2px dashed #8fb2cc; border-radius:14px; background:#f6fafd; padding:14px 16px 6px; }
+.pp-drop-title { font-size:16px; font-weight:780; color:#183b60; text-align:center; }
+.pp-drop-hint { font-size:12.5px; color:#5c7084; text-align:center; margin:2px 0 8px; }
+.st-key-pdf_drop [data-testid="stFileUploaderDropzone"] { min-height:120px; background:#fff;
+  border:1px solid #d6e2ec; justify-content:center; }
+
+/* 자료를 넣기 전 안내 */
+.pp-guide { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+.pp-guide-step { flex:1 1 220px; display:flex; gap:10px; background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); color:#2c4560; font-size:14px; }
+.pp-guide-no { flex:none; width:26px; height:26px; border-radius:50%; background:#183b60; color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:750; font-size:13px; }
+.pp-guide-desc { color:#5c7084; font-size:12.5px; margin-top:3px; line-height:1.5; }
+
 /* 단계 보기·규칙 */
 .pp-steps { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
 .pp-step { border:1px solid #e8eef4; border-radius:10px; padding:10px; background:#fbfdff; }
@@ -242,11 +258,11 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 def init_state() -> None:
     ss = st.session_state
     ss.setdefault("page", PAGES[0])
-    ss.setdefault("input_mode", MODES[0])
+    ss.setdefault("input_mode", M_PDF)
     ss.setdefault("arxiv_id", "")
     ss.setdefault("paste_text", "")
-    ss.setdefault("input_text", DEMO_TEXT)
-    ss.setdefault("source", {"kind": "demo"})
+    ss.setdefault("input_text", "")         # 자료를 넣기 전에는 비어 있고, 아래 결과 창들을 그리지 않는다
+    ss.setdefault("source", {"kind": "none"})
     ss.setdefault("active_rules", set(P.DEFAULT_ACTIVE_RULES))
     ss.setdefault("translations", {})
     ss.setdefault("show_steps", False)
@@ -288,6 +304,16 @@ def pick_section() -> None:
     sec = ss.paper.sections[i]
     ss.input_text = sec.text
     ss.source = {**ss.source, "section": sec.title, "section_idx": i}
+
+
+def on_pdf_drop() -> None:
+    """PDF를 끌어다 놓거나 고르면 버튼 없이 바로 분석한다."""
+    ss = st.session_state
+    f = ss.get("pdf_file")
+    if f is None:                          # 올린 파일을 지운 경우: 지금 보던 결과는 그대로 둔다
+        return
+    with st.spinner("PDF에서 글자를 읽고 절을 나누는 중…"):
+        ss.input_error = load_pdf(f.getvalue(), f.name)
 
 
 def load_pdf(data: bytes, name: str) -> str | None:
@@ -563,6 +589,8 @@ def topbar() -> None:
 
 def source_flag() -> str:
     src = st.session_state.source
+    if src["kind"] == "none":
+        return "아직 넣은 자료가 없어요"
     if src["kind"] == "demo":
         return "화면 예시 데이터 · 직접 작성, 실제 논문 아님"
     if src["kind"] == "arxiv":
@@ -577,36 +605,37 @@ def source_flag() -> str:
 def input_panel() -> None:
     ss = st.session_state
     with st.container(key="input_panel"):
-        c1, c2, c3, c4, c5 = st.columns([1.6, 1.75, 2.1, 1.25, 2.3], vertical_alignment="center")
+        c1, c2, c5 = st.columns([1.6, 2.4, 2.3], vertical_alignment="center")
         c1.markdown(f'<div class="pp-input-copy"><div class="pp-lead">{ICON["search"]}</div><div>'
-                    f'<div class="pp-field-label">분석할 논문 불러오기</div>'
-                    f'<div class="pp-field-hint">arXiv ID · 직접 붙여 넣기 · 논문 PDF</div></div></div>', unsafe_allow_html=True)
+                    f'<div class="pp-field-label">분석할 논문 넣기</div>'
+                    f'<div class="pp-field-hint">논문 PDF · arXiv ID · 직접 붙여 넣기</div></div></div>', unsafe_allow_html=True)
         with c2:
-            mode = st.segmented_control("입력 방식", MODES, key="input_mode", label_visibility="collapsed") or MODES[0]
-        with c3:
-            if mode == MODES[0]:
-                st.text_input("arXiv ID", key="arxiv_id", placeholder="arXiv ID  예: 2402.08910",
-                              label_visibility="collapsed")
-            elif mode == MODES[1]:
-                st.caption("아래 칸에 영어 초록이나 단락을 붙여 넣으세요.")
-            else:
-                st.caption("아래에 논문 PDF를 올리면 절별로 나눠 전체를 분석해요.")
-        with c4:
-            label = {MODES[0]: "초록 불러오기", MODES[1]: "분석하기", MODES[2]: "PDF 분석하기"}[mode]
-            clicked = st.button(label, type="primary", use_container_width=True, key="load_btn")
+            mode = st.segmented_control("입력 방식", MODES, key="input_mode", label_visibility="collapsed") or M_PDF
         c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>올린 파일과 붙여 넣은 텍스트는 저장하지 않아요.<br>'
                     f'번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>', unsafe_allow_html=True)
-        if mode == MODES[1]:
+        clicked = False
+        if mode == M_PDF:
+            with st.container(key="pdf_drop"):
+                st.markdown('<div class="pp-drop-title">논문 PDF를 이 칸에 끌어다 놓으세요</div>'
+                            f'<div class="pp-drop-hint">또는 아래 칸을 눌러 파일을 고르세요 · 놓으면 바로 절별로 나눠 분석해요 · '
+                            f'{MAX_PDF_MB}MB 이하, 글자를 선택할 수 있는 PDF</div>', unsafe_allow_html=True)
+                st.file_uploader("논문 PDF", type=["pdf"], key="pdf_file", label_visibility="collapsed",
+                                 on_change=on_pdf_drop,
+                                 help="스캔한 이미지 PDF는 글자가 없어 읽지 못해요.")
+        elif mode == M_ARXIV:
+            i1, i2 = st.columns([3, 1], vertical_alignment="center")
+            i1.text_input("arXiv ID", key="arxiv_id", placeholder="arXiv ID  예: 2402.08910",
+                          label_visibility="collapsed")
+            clicked = i2.button("초록 불러오기", type="primary", use_container_width=True, key="load_btn")
+        else:
             st.text_area("영어 텍스트", key="paste_text", height=150, label_visibility="collapsed",
                          placeholder="영어 논문 초록이나 단락을 붙여 넣으세요. PDF 복사 잔재(줄바꿈·쪽번호·머리말)는 자동으로 정리해요.")
-        if mode == MODES[2]:
-            st.file_uploader("논문 PDF", type=["pdf"], key="pdf_file", label_visibility="collapsed",
-                             help=f"글자를 선택할 수 있는 영어 논문 PDF({MAX_PDF_MB}MB 이하). 스캔 이미지 PDF는 읽지 못해요.")
+            clicked = st.button("분석하기", type="primary", key="load_btn")
         st.button("예시 문단으로 보기", key="demo_btn", type="tertiary", on_click=load_demo)
 
         if clicked:
             ss.input_error = None
-            if mode == MODES[0]:
+            if mode == M_ARXIV:
                 with st.spinner("arXiv에서 초록을 불러오는 중…"):
                     try:
                         row = fetch_abstract(ss.arxiv_id)
@@ -615,13 +644,6 @@ def input_panel() -> None:
                         ss.paper = None
                     except ArxivError as e:
                         ss.input_error = str(e)
-            elif mode == MODES[2]:
-                f = ss.get("pdf_file")
-                if f is None:
-                    ss.input_error = "PDF 파일을 먼저 올려 주세요."
-                else:
-                    with st.spinner("PDF에서 글자를 읽고 절을 나누는 중…"):
-                        ss.input_error = load_pdf(f.getvalue(), f.name)
             else:
                 txt = ss.paste_text.strip()
                 letters = sum(ch.isalpha() for ch in txt)
@@ -774,6 +796,18 @@ def translation_panel(a) -> None:
                    f"오늘 사이트 전체 {usage.used_today():,}/{lim.daily:,}자 · 긴 글은 {lim.per_request:,}자씩 나눠 번역")
 
 
+def empty_guide() -> None:
+    """자료를 넣기 전 화면: 결과 창들은 숨기고 쓰는 순서만 보여 준다."""
+    steps = [("1", "논문 넣기", "PDF를 위 칸에 끌어다 놓거나, arXiv ID·텍스트를 넣어요."),
+             ("2", "절 고르기", "PDF는 Abstract·Introduction처럼 절로 나뉘어요. 읽을 절을 눌러요."),
+             ("3", "읽는 길 따라가기", "3줄 뼈대 → 형광펜·밑줄 원문 → 번역 → 흐름도·어려운 단어표 순서로 봐요.")]
+    cards = "".join(f'<div class="pp-guide-step"><div class="pp-guide-no">{n}</div><div><b>{t}</b>'
+                    f'<div class="pp-guide-desc">{d}</div></div></div>' for n, t, d in steps)
+    st.markdown(f'<div class="pp-guide">{cards}</div>'
+                '<div class="pp-meta" style="margin-top:8px">자료를 넣으면 3줄 뼈대, 원문·번역, 흐름도와 단어표가 이 아래에 나타나요. '
+                '먼저 둘러보려면 위의 <b>예시 문단으로 보기</b>를 눌러요.</div>', unsafe_allow_html=True)
+
+
 def reading_page() -> None:
     ss = st.session_state
     st.markdown(f'<div class="pp-intro"><div><div class="pp-eyebrow">ACADEMIC READING WORKSPACE</div>'
@@ -781,6 +815,9 @@ def reading_page() -> None:
                 f'<div class="pp-desc">원문은 그대로, 핵심 문장과 읽기 신호는 한눈에.</div></div>'
                 f'<div class="pp-flag">{ICON["info"]}{esc(source_flag())}</div></div>', unsafe_allow_html=True)
     input_panel()
+    if not ss.input_text:
+        empty_guide()
+        return
     if ss.paper is not None and ss.source["kind"] == "pdf":
         paper_overview(ss.paper)
 
