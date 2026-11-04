@@ -5,6 +5,7 @@
 - **현재 Phase**: **Phase 3 진입 가능** — 2026-11-04 컨펌 완료([docs/PLAN.md](PLAN.md) 4차 개정, P0 6개). 구현 항목은 [docs/PHASE3_CHECKLIST.md](PHASE3_CHECKLIST.md). UI는 PaperPath v03 인계 패키지로 확정([docs/design/paperpath-v03/](design/paperpath-v03/README_FIRST.md))
 - **마감**: **2026-11-30 확정** (2026-11-04 기준 남은 26일). 최종본 동결은 11/29
 - **저장소**: https://github.com/uisang2004-maker/eng-data-regex-project (비공개)
+- **공개 사이트**: https://paperpath-hufs.streamlit.app/ (Streamlit Community Cloud, 공개, 2026-11-04 이의상 배포)
 
 ## 확정된 결정
 
@@ -14,6 +15,7 @@
 | 2026-11-03 | 마감은 12월 초(약 4주)로 잡고 범위를 정함 |
 | 2026-11-03 | 아이디어 3을 「논문 독해 도우미」로 확장해 프로토타입 진행 (컨펌 아님) |
 | 2026-11-03 | 번역 엔진: DeepL API Free (이의상 선택) |
+| 2026-11-04 | **공개 배포 완료**(이의상): https://paperpath-hufs.streamlit.app/ , 앱 공개 전환. 저장소는 비공개 유지 |
 | 2026-11-04 | 공개 배포 방식: Streamlit Community Cloud, DeepL 키는 넣되 사용 제한(한 번 3,000자, 세션 10회, 하루 3만 자) (이의상 결정). 배포 클릭은 이의상 님이 직접 |
 | 2026-11-04 | 색 통일(새 색 없음: 용어 설명=파랑, 수치=청록)과 반복 용어 밑줄 추가(이의상 요청) |
 | 2026-11-04 | 표시 범위 확대: 용어 설명·예시(분홍, 점선 밑줄)와 수치 근거(남색) 추가(이의상 요청) |
@@ -261,3 +263,17 @@
 3. 파일: `src/usage.py`(신규), `app.py`, `tests/test_usage.py`(신규), `tests/test_app.py`, `.gitignore`(usage_today.json 제외), `README.md`(배포 절).
 4. 테스트: `py -I -m pytest` **130 passed**. 세션 한도를 넘기면 번역 대신 안내가 뜨는 것을 화면 테스트로 확인함(실제 DeepL 호출 없음).
 5. 이의상 님 할 일: share.streamlit.io에서 배포(로그인, 키 입력, Deploy, 공개 전환). 이 단계는 계정·키 입력이라 대신할 수 없음.
+
+### 2026-11-04 (13) — 공개 배포 확인
+
+1. 이의상 님이 Streamlit Community Cloud에 배포하고 공개로 전환함: https://paperpath-hufs.streamlit.app/
+2. 중간 문제와 해결
+   - ① 저장소가 목록에 안 보임: 비공개 저장소 접근 권한 문제라 Linked accounts에서 권한을 주거나 직접 입력하는 방법을 안내함
+   - ② 처음 배포 파일이 `prototype/paper-reader/app.py`(예전 프로토타입)로 잡혀 번역 기능이 없었음. 로그 첫 줄에서 원인을 찾아 `app.py`로 다시 배포하게 함
+   - ③ 새 앱은 기본이 비공개라 공개 전환을 다시 함
+3. 확인(브라우저로 직접 접속)
+   - PaperPath 첫 화면, 3줄 뼈대, 칩, 번역 패널이 정상
+   - "번역하기"를 누르면 예시 문단은 저장된 번역으로 표시됨(DeepL 호출 없음). 카드 아래 번역 3개, 번역문 형광펜 7개, 밑줄 3개
+   - 사용량 표시 "이 화면 0/10회 · 오늘 사이트 전체 0/30,000자"
+4. 확인하지 못한 것: 배포 서버의 DeepL 키(Secrets)로 새 텍스트를 실제 번역하는 경우. 무료 한도를 쓰는 일이라 이의상 님이 짧은 문장 하나로 확인하기로 함.
+5. 파일: `README.md`(공개 주소), `docs/PROGRESS.md`, `docs/screenshots/deployed-paperpath-hufs.jpg`.

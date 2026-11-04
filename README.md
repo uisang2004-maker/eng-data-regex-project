@@ -4,6 +4,8 @@
 
 영어 논문 초록이나 단락을 넣으면 **정규표현식이** 먼저 읽을 문장 3개(문제·방법·결과)를 원문에서 고르고, 약어·추측·확신·참조 표현을 근거와 함께 표시합니다. 필요하면 한국어 번역을 문장 단위로 옆에 켭니다. AI가 대신 요약하지 않습니다. **읽는 길은 정규식이, 판단은 학생이.**
 
+> **공개 사이트: https://paperpath-hufs.streamlit.app/** (Streamlit Community Cloud, 2026-11-04 배포)
+>
 > 현재 상태: **Phase 3 (구현 중)** · 마감 2026-11-30 · 진행 기록은 [docs/PROGRESS.md](docs/PROGRESS.md), 계획은 [docs/PLAN.md](docs/PLAN.md)를 보세요.
 
 ![PaperPath 첫 화면](docs/screenshots/phase3-desktop-1440x900.jpg)
