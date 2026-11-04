@@ -7,8 +7,10 @@
 import hashlib
 import html
 import re
+from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src import patterns as P
 from src import translate as T
@@ -21,6 +23,11 @@ from src.extract import ROLE_ORDER, analyze
 from src.pdf_text import PdfError, extract as extract_pdf
 from src.sections import PAGES as PAPER_PAGES, paper_pages, split_paper
 from src.tables import find_tables, mentioned as mentioned_tables
+from src import saved as SV
+
+# 브라우저 저장(localStorage) 컴포넌트: components/browser_store/index.html. 화면에는 보이지 않는다
+_browser_store = components.declare_component(
+    "browser_store", path=str(Path(__file__).resolve().parent / "components" / "browser_store"))
 
 PAGES = ("논문 읽기", "규칙 탐색", "검증 결과")
 MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
@@ -223,6 +230,9 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* 브라우저 저장 컴포넌트(보이지 않음) */
+.st-key-browser_store_box { position:absolute; height:0; overflow:hidden; margin:0; padding:0; }
+
 /* 단어표 아래 이름 목록 */
 .pp-names { margin:8px 0 4px; }
 .pp-chip.gray { color:#4c5d70; background:#eef2f6; }
@@ -299,11 +309,15 @@ def init_state() -> None:
     ss.setdefault("show_translation", True)
     ss.setdefault("input_error", None)
     ss.setdefault("deepl_calls", 0)
-    ss.setdefault("paper", None)
+    ss.setdefault("paper", None)              # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
     ss.setdefault("paper_cur", "초록")        # PDF 논문에서 지금 보는 쪽(초록·본문·결론)
     ss.setdefault("body_cur", 0)              # 본문 쪽에서 지금 보는 절 번호
-    ss.setdefault("show_input", True)
-    ss.setdefault("ai_gloss", {})         # {글 해시: {단어: AI 풀이}} — 이 화면(세션)에만 둔다     # 자료를 넣으면 입력 칸을 닫고, '다시 넣기'로 다시 연다          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
+    ss.setdefault("show_input", True)         # 자료를 넣으면 입력 칸을 닫고, '다시 넣기'로 다시 연다
+    ss.setdefault("ai_gloss", {})             # {글 해시: {단어: AI 풀이}}
+    ss.setdefault("saved_sig", {})            # 이 브라우저에 저장했거나 불러온 글: 해시 → 저장 표시(src.saved.signature)
+    ss.setdefault("browser_ver", 0)           # 브라우저 저장 요청 번호(바뀔 때만 컴포넌트가 저장한다)
+    ss.setdefault("browser_loaded", False)    # 이 화면을 연 뒤 브라우저에 저장된 결과를 불러왔는지
+    ss.setdefault("browser_keys", set())      # 지금 이 브라우저에 저장돼 있는 글 해시(화면 표시용)
 
 
 @st.cache_resource
@@ -368,11 +382,87 @@ def set_show_input(on: bool) -> None:
 def loaded_bar() -> None:
     """자료를 넣은 뒤에는 입력 칸 대신 지금 읽는 자료와 '다시 넣기' 버튼만 보인다."""
     with st.container(key="loaded_bar"):
-        c1, c2 = st.columns([5, 1], vertical_alignment="center")
+        c1, c3, c2 = st.columns([4.2, 1.3, 1], vertical_alignment="center")
         c1.markdown(f'<div class="pp-loaded"><span class="pp-loaded-label">지금 읽는 자료</span>'
                     f'{esc(source_flag())}</div>', unsafe_allow_html=True)
+        ss = st.session_state
+        items = SV.pack_items(ss.translations, ss.ai_gloss)
+        c3.download_button("결과 파일 내려받기", SV.to_file(items, ss.source.get("title", "")),
+                           file_name="paperpath_results.json", mime="application/json", key="saved_dl",
+                           icon=":material/download:", use_container_width=True, disabled=not items,
+                           help="번역·뜻 풀이 결과를 파일로 받아요. 다른 PC에서 '결과 파일 불러오기'로 넣으면 다시 번역하지 않아요.")
         c2.button("다시 넣기", key="reinput_btn", icon=":material/upload_file:", use_container_width=True,
                   on_click=set_show_input, args=(True,), help="다른 PDF·arXiv ID·텍스트를 넣어요")
+
+
+def saved_panel() -> None:
+    """입력 칸 아래: 이 브라우저에 저장된 결과 수, 지우기(A), 결과 파일 불러오기(B)."""
+    ss = st.session_state
+    n = len(ss.browser_keys)
+    with st.expander(f"저장된 번역 · 이 브라우저에 {n}개 글" if n else "저장된 번역 · 결과 파일 불러오기"):
+        st.caption("번역·단어 뜻 풀이 결과는 이 브라우저에 자동으로 저장돼요(서버에는 저장하지 않음). 같은 PDF·글을 다시 넣으면 "
+                   "API를 다시 부르지 않고 저장된 번역으로 바로 열려요. 다른 PC에서는 결과 파일을 불러오세요.")
+        st.file_uploader("결과 파일 불러오기(.json)", type=["json"], key="saved_file", on_change=on_saved_upload)
+        if ss.get("saved_msg"):
+            st.success(ss.saved_msg)
+        if n:
+            st.button("이 브라우저에 저장된 번역 모두 지우기", key="saved_clear", type="tertiary", on_click=clear_browser)
+
+
+def on_saved_upload() -> None:
+    """결과 파일(B) → 이 화면에 합치고, 브라우저 저장에도 넣는다(다음 실행에서 자동 저장)."""
+    ss = st.session_state
+    f = ss.get("saved_file")
+    if f is None:
+        return
+    try:
+        tr, gl = SV.unpack_items(SV.from_file(f.getvalue()))
+    except ValueError as e:
+        ss.saved_msg = None
+        ss.input_error = str(e)
+        return
+    ss.translations.update(tr)
+    ss.ai_gloss.update(gl)
+    ss.input_error = None
+    n = len({k for k, _ in tr} | set(gl))
+    ss.saved_msg = f"결과 {n}개 글을 불러왔어요. 같은 PDF·글을 넣으면 저장된 번역으로 바로 열려요."
+
+
+def clear_browser() -> None:
+    ss = st.session_state
+    ss.browser_clear = True
+    ss.saved_msg = "이 브라우저에 저장된 번역을 지웠어요(지금 화면의 결과는 새로고침하면 사라져요)."
+
+
+def browser_sync() -> None:
+    """A: 이 브라우저(localStorage)와 번역·뜻 풀이 결과를 맞춘다. 처음 열 때 저장된 결과를 불러오고,
+    새로 생긴 결과만 저장한다. 컴포넌트는 화면에 보이지 않는다(높이 0)."""
+    ss = st.session_state
+    items = SV.pack_items(ss.translations, ss.ai_gloss)
+    clear = ss.pop("browser_clear", False)
+    if clear:                              # 지우기: 지금 화면에 남은 결과는 다시 저장하지 않는다(새 결과만 저장)
+        ss.saved_sig = {k: SV.signature(v) for k, v in items.items()}
+        ss.browser_keys = set()
+    pending = {k: v for k, v in items.items() if ss.saved_sig.get(k) != SV.signature(v)}
+    if pending or clear:
+        ss.browser_ver += 1
+    with st.container(key="browser_store_box"):
+        value = _browser_store(save=pending or None, clear=clear, ver=str(ss.browser_ver), max=SV.MAX_BYTES,
+                               key="browser_store", default=None)
+    for k, v in pending.items():
+        ss.saved_sig[k] = SV.signature(v)
+        ss.browser_keys.add(k)
+    if value and not ss.browser_loaded:
+        ss.browser_loaded = True
+        stored = value.get("items") or {}
+        ss.browser_keys |= set(stored)
+        tr, gl = SV.unpack_items(stored)
+        for k, r in tr.items():
+            ss.translations.setdefault(k, r)
+        for k, g in gl.items():
+            ss.ai_gloss.setdefault(k, g)
+        for k, item in stored.items():
+            ss.saved_sig.setdefault(k, SV.signature(item))
 
 
 def on_pdf_drop() -> None:
@@ -755,8 +845,9 @@ def input_panel() -> None:
                     f'<div class="pp-field-hint">논문 PDF · arXiv ID · 직접 붙여 넣기</div></div></div>', unsafe_allow_html=True)
         with c2:
             mode = st.segmented_control("입력 방식", MODES, key="input_mode", label_visibility="collapsed") or M_PDF
-        c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>올린 파일과 붙여 넣은 텍스트는 저장하지 않아요.<br>'
-                    f'번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>', unsafe_allow_html=True)
+        c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>올린 파일과 붙여 넣은 텍스트는 서버에 저장하지 않아요. '
+                    f'번역 결과는 이 브라우저에만 저장돼요.<br>번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>',
+                    unsafe_allow_html=True)
         clicked = False
         if mode == M_PDF:
             with st.container(key="pdf_drop"):
@@ -779,6 +870,7 @@ def input_panel() -> None:
         b1.button("예시 문단으로 보기", key="demo_btn", type="tertiary", on_click=load_demo)
         if ss.input_text:                  # 다시 넣다가 그만두면 보던 결과로 돌아간다
             b2.button("← 보던 결과로 돌아가기", key="back_btn", type="tertiary", on_click=set_show_input, args=(False,))
+        saved_panel()
 
         if clicked:
             ss.input_error = None
@@ -1346,6 +1438,7 @@ def main() -> None:
                        initial_sidebar_state="collapsed")
     st.markdown(CSS, unsafe_allow_html=True)
     init_state()
+    browser_sync()
     topbar()
     page = st.session_state.page
     if page == PAGES[0]:
