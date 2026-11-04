@@ -90,12 +90,24 @@ def test_translation_result_survives_rule_toggle(at):
     assert at.session_state["translations"][key].ko[0] == "번역 0"
 
 
-def test_paste_validation_error(at):
-    at.session_state["input_mode"] = "텍스트 붙여 넣기"
-    at.run()
-    at.text_area(key="paste_text").set_value("한국어 문장만 있어요.").run()
-    at.button(key="load_btn").click().run()
-    assert any("영어 텍스트가 아닌" in e.value for e in at.error)
+def test_paste_validation_error(blank):
+    blank.session_state["input_mode"] = "텍스트 붙여 넣기"
+    blank.run()
+    blank.text_area(key="paste_text").set_value("한국어 문장만 있어요.").run()
+    blank.button(key="load_btn").click().run()
+    assert any("영어 텍스트가 아닌" in e.value for e in blank.error)
+    assert blank.session_state["show_input"] is True        # 실패하면 입력 칸이 그대로 열려 있다
+
+
+def test_input_panel_closes_after_loading_and_reopens(at):
+    keys = lambda: {b.key for b in at.button}
+    assert "reinput_btn" in keys() and "load_btn" not in keys() and "demo_btn" not in keys()
+    assert "pp-reader-title" in md_text(at)
+    at.button(key="reinput_btn").click().run()
+    assert "demo_btn" in keys() and "back_btn" in keys()
+    assert not any("pp-reader-title" in m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
+    at.button(key="back_btn").click().run()
+    assert "reinput_btn" in keys() and at.session_state["input_text"]
 
 
 def test_pages_render(at):

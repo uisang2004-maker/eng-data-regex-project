@@ -217,6 +217,13 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* 자료를 넣은 뒤 위쪽 막대 */
+.st-key-loaded_bar { background:var(--surface); border:1px solid var(--line); border-left:3px solid #4f86ad;
+  border-radius:12px; padding:8px 14px; box-shadow:var(--shadow); }
+.pp-loaded { font-size:13.5px; color:#2c4560; }
+.pp-loaded-label { font-size:11.5px; font-weight:750; color:#60758a; background:#eef3f8; border-radius:6px;
+  padding:2px 7px; margin-right:8px; }
+
 /* PDF 끌어다 놓기 칸 */
 .st-key-pdf_drop { border:2px dashed #8fb2cc; border-radius:14px; background:#f6fafd; padding:14px 16px 6px; }
 .pp-drop-title { font-size:16px; font-weight:780; color:#183b60; text-align:center; }
@@ -269,7 +276,8 @@ def init_state() -> None:
     ss.setdefault("show_translation", True)
     ss.setdefault("input_error", None)
     ss.setdefault("deepl_calls", 0)
-    ss.setdefault("paper", None)          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
+    ss.setdefault("paper", None)
+    ss.setdefault("show_input", True)     # 자료를 넣으면 입력 칸을 닫고, '다시 넣기'로 다시 연다          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
 
 
 @st.cache_resource
@@ -293,6 +301,7 @@ def load_demo() -> None:
     st.session_state.source = {"kind": "demo"}
     st.session_state.input_error = None
     st.session_state.paper = None
+    st.session_state.show_input = False
 
 
 def pick_section() -> None:
@@ -304,6 +313,21 @@ def pick_section() -> None:
     sec = ss.paper.sections[i]
     ss.input_text = sec.text
     ss.source = {**ss.source, "section": sec.title, "section_idx": i}
+
+
+def set_show_input(on: bool) -> None:
+    st.session_state.show_input = on
+    st.session_state.input_error = None
+
+
+def loaded_bar() -> None:
+    """자료를 넣은 뒤에는 입력 칸 대신 지금 읽는 자료와 '다시 넣기' 버튼만 보인다."""
+    with st.container(key="loaded_bar"):
+        c1, c2 = st.columns([5, 1], vertical_alignment="center")
+        c1.markdown(f'<div class="pp-loaded"><span class="pp-loaded-label">지금 읽는 자료</span>'
+                    f'{esc(source_flag())}</div>', unsafe_allow_html=True)
+        c2.button("다시 넣기", key="reinput_btn", icon=":material/upload_file:", use_container_width=True,
+                  on_click=set_show_input, args=(True,), help="다른 PDF·arXiv ID·텍스트를 넣어요")
 
 
 def on_pdf_drop() -> None:
@@ -334,6 +358,7 @@ def load_pdf(data: bytes, name: str) -> str | None:
     ss.section_pick = 0
     ss.input_text = paper.sections[0].text
     ss.source = {"kind": "pdf", "title": paper.title, "section": paper.sections[0].title, "section_idx": 0}
+    ss.show_input = False
     return None
 
 
@@ -631,7 +656,10 @@ def input_panel() -> None:
             st.text_area("영어 텍스트", key="paste_text", height=150, label_visibility="collapsed",
                          placeholder="영어 논문 초록이나 단락을 붙여 넣으세요. PDF 복사 잔재(줄바꿈·쪽번호·머리말)는 자동으로 정리해요.")
             clicked = st.button("분석하기", type="primary", key="load_btn")
-        st.button("예시 문단으로 보기", key="demo_btn", type="tertiary", on_click=load_demo)
+        b1, b2 = st.columns([1, 1])
+        b1.button("예시 문단으로 보기", key="demo_btn", type="tertiary", on_click=load_demo)
+        if ss.input_text:                  # 다시 넣다가 그만두면 보던 결과로 돌아간다
+            b2.button("← 보던 결과로 돌아가기", key="back_btn", type="tertiary", on_click=set_show_input, args=(False,))
 
         if clicked:
             ss.input_error = None
@@ -642,6 +670,7 @@ def input_panel() -> None:
                         ss.input_text = row["abstract"]
                         ss.source = {"kind": "arxiv", "id": row["id"], "title": row["title"]}
                         ss.paper = None
+                        ss.show_input = False
                     except ArxivError as e:
                         ss.input_error = str(e)
             else:
@@ -657,6 +686,7 @@ def input_panel() -> None:
                     ss.input_text = txt
                     ss.source = {"kind": "paste"}
                     ss.paper = None
+                    ss.show_input = False
             if not ss.input_error:
                 st.rerun()                 # 위쪽 출처 표시까지 새 글 기준으로 다시 그린다
         if ss.input_error:
@@ -814,10 +844,12 @@ def reading_page() -> None:
                 f'<h1 class="pp-h1">논문을 읽는 길을 먼저 보여드려요.</h1>'
                 f'<div class="pp-desc">원문은 그대로, 핵심 문장과 읽기 신호는 한눈에.</div></div>'
                 f'<div class="pp-flag">{ICON["info"]}{esc(source_flag())}</div></div>', unsafe_allow_html=True)
-    input_panel()
-    if not ss.input_text:
-        empty_guide()
-        return
+    if ss.show_input or not ss.input_text:
+        input_panel()
+        if not ss.input_text:
+            empty_guide()
+        return                             # 입력 칸이 열려 있는 동안은 결과 창을 숨긴다
+    loaded_bar()
     if ss.paper is not None and ss.source["kind"] == "pdf":
         paper_overview(ss.paper)
 
