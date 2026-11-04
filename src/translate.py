@@ -256,17 +256,20 @@ The input is XML-like markup. Follow these rules exactly:
 5. Output only the translated markup, with nothing before or after it."""
 
 
-def _claude_one(xml: str, api_key: str, client=None) -> str:
+def _claude_one(xml: str, api_key: str, client=None, system: str = CLAUDE_SYSTEM, fmt: dict | None = None,
+                task: str = "번역") -> str:
+    """Claude Haiku 한 번 호출. fmt를 주면 JSON 스키마로 답을 받는다(단어 풀이, src/explain.py)."""
     import anthropic
 
     client = client or anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=60.0)
+    config = {"effort": "low", **({"format": fmt} if fmt else {})}
     try:
         resp = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=16000,
-            system=CLAUDE_SYSTEM,
-            thinking={"type": "disabled"},        # 번역은 깊은 추론이 필요 없어 생각 토큰을 쓰지 않는다
-            output_config={"effort": "low"},
+            system=system,
+            thinking={"type": "disabled"},        # 번역·풀이는 깊은 추론이 필요 없어 생각 토큰을 쓰지 않는다
+            output_config=config,
             messages=[{"role": "user", "content": xml}],
         )
     except anthropic.AuthenticationError as e:
@@ -276,13 +279,13 @@ def _claude_one(xml: str, api_key: str, client=None) -> str:
     except anthropic.RateLimitError as e:
         raise TranslationError(ERROR_MESSAGES[429], 429) from e
     except anthropic.APIStatusError as e:
-        raise TranslationError(f"Claude 오류(HTTP {e.status_code})로 번역하지 못했어요.", e.status_code) from e
+        raise TranslationError(f"Claude 오류(HTTP {e.status_code})로 {task}하지 못했어요.", e.status_code) from e
     except anthropic.APIConnectionError as e:
-        raise TranslationError("Claude에 연결하지 못했어요. 번역을 잠시 사용할 수 없어요.") from e
+        raise TranslationError(f"Claude에 연결하지 못했어요. {task} 기능을 잠시 사용할 수 없어요.") from e
     if resp.stop_reason == "refusal":
-        raise TranslationError("AI 번역이 이 글을 번역하지 않았어요. 독해 표시는 그대로 볼 수 있어요.")
+        raise TranslationError(f"AI가 이 글을 처리하지 않았어요({task}). 독해 표시는 그대로 볼 수 있어요.")
     if resp.stop_reason == "max_tokens":
-        raise TranslationError("글이 길어 AI 번역이 중간에 끊겼어요. 더 짧은 부분으로 나눠 주세요.")
+        raise TranslationError(f"글이 길어 AI {task} 답이 중간에 끊겼어요. 더 짧은 부분으로 나눠 주세요.")
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 

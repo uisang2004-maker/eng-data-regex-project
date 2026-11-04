@@ -47,6 +47,7 @@ class Entry:
     first_sentence: int | None = None      # 1부터
     explanation: str = ""                  # 원문에서 가져온 풀네임·설명
     korean: str = ""                       # 번역문에서 가져온 대응어(번역을 실행했을 때만)
+    ai_meaning: str = ""                   # AI 풀이(참고용, 'AI로 뜻 풀이 받기'를 눌렀을 때만, src/explain.py)
 
 
 @lru_cache(maxsize=1)
@@ -198,12 +199,28 @@ def korean_marks(tr) -> list[list[tuple]]:
     return [[(a, b, c, en, ko[a:b]) for a, b, c, en in row] for ko, row in zip(tr.ko, tr.ko_marks)]
 
 
+def ai_items(a: Analysis, rows: list[Entry]) -> list[tuple[str, str, str]]:
+    """AI 풀이 요청용 (단어, 처음 나온 문장, 원문에서 찾은 풀네임·설명)."""
+    out = []
+    for e in rows:
+        sent = a.sentences[e.first_sentence - 1].text if e.first_sentence else ""
+        known = "" if e.explanation == "이 글에서 정의를 찾지 못함" else e.explanation
+        out.append((e.term, sent, known))
+    return out
+
+
+def apply_ai(rows: list[Entry], meanings: dict[str, str]) -> list[Entry]:
+    for e in rows:
+        e.ai_meaning = meanings.get(e.term, "")
+    return rows
+
+
 def to_csv(rows: list[Entry]) -> bytes:
     """엑셀에서 한글이 깨지지 않도록 UTF-8 BOM을 붙인다."""
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["용어", "종류", "난이도", "등장 횟수", "처음 나온 문장", "풀네임·설명(원문)", "한국어(번역기 대응어)"])
+    w.writerow(["용어", "종류", "난이도", "등장 횟수", "처음 나온 문장", "풀네임·설명(원문)", "한국어(번역기 대응어)", "AI 풀이(참고용)"])
     for e in rows:
         w.writerow([e.term, ", ".join(KIND_LABEL[k] for k in e.kinds), e.level, e.count,
-                    e.first_sentence or "", e.explanation, e.korean])
+                    e.first_sentence or "", e.explanation, e.korean, e.ai_meaning])
     return ("﻿" + buf.getvalue()).encode("utf-8")

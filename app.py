@@ -15,6 +15,7 @@ from src import usage
 from src.analyze import load_benchmark, skeleton_stats
 from src.collect import ArxivError, fetch_abstract, load_samples
 from src import glossary as G
+from src.explain import MAX_TERMS, explain_terms
 from src.extract import ROLE_ORDER, analyze
 from src.pdf_text import PdfError, extract as extract_pdf
 from src.sections import split_paper
@@ -217,6 +218,10 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* 단어표 AI 풀이 칸 */
+.pp-ai { color:#4b3f72; }
+.pp-ai-badge { font-size:10.5px; font-weight:700; color:#6b5a9e; background:#f1edf9; border-radius:5px; padding:1px 5px; }
+
 /* 자료를 넣은 뒤 위쪽 막대 */
 .st-key-loaded_bar { background:var(--surface); border:1px solid var(--line); border-left:3px solid #4f86ad;
   border-radius:12px; padding:8px 14px; box-shadow:var(--shadow); }
@@ -277,7 +282,8 @@ def init_state() -> None:
     ss.setdefault("input_error", None)
     ss.setdefault("deepl_calls", 0)
     ss.setdefault("paper", None)
-    ss.setdefault("show_input", True)     # 자료를 넣으면 입력 칸을 닫고, '다시 넣기'로 다시 연다          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
+    ss.setdefault("show_input", True)
+    ss.setdefault("ai_gloss", {})         # {글 해시: {단어: AI 풀이}} — 이 화면(세션)에만 둔다     # 자료를 넣으면 입력 칸을 닫고, '다시 넣기'로 다시 연다          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
 
 
 @st.cache_resource
@@ -540,16 +546,19 @@ def flow_map(a, tr=None) -> str:
 
 
 def glossary_table(rows) -> str:
+    ai = any(e.ai_meaning for e in rows)
     if not rows:
         return '<div class="pp-meta">이 글에서 어려운 단어(전문용어)를 찾지 못했어요.</div>'
     body = "".join(
         f"<tr><td><b>{esc(e.term)}</b></td><td>{esc(', '.join(G.KIND_LABEL[k] for k in e.kinds))}</td>"
         f"<td>{esc(e.level) or '-'}</td>"
         f"<td>{e.count}</td><td>{('문장 ' + str(e.first_sentence)) if e.first_sentence else '-'}</td>"
-        f"<td>{esc(e.explanation) or '-'}</td><td>{esc(e.korean) or '-'}</td></tr>" for e in rows)
+        f"<td>{esc(e.explanation) or '-'}</td><td>{esc(e.korean) or '-'}</td>"
+        + (f'<td class="pp-ai">{esc(e.ai_meaning) or "-"}</td>' if ai else "") + "</tr>" for e in rows)
+    ai_head = '<th>AI 풀이 <span class="pp-ai-badge">참고용</span></th>' if ai else ""
     return (f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-gloss"><thead><tr>'
             f'<th>용어</th><th>종류</th><th>난이도</th><th>횟수</th><th>처음 나온 곳</th><th>풀네임·설명(원문)</th><th>한국어</th>'
-            f'</tr></thead><tbody>{body}</tbody></table></div>')
+            f'{ai_head}</tr></thead><tbody>{body}</tbody></table></div>')
 
 
 SIGNAL_ROLE = {"problem": "문제", "method": "방법", "result": "결과"}
@@ -745,6 +754,28 @@ def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
     return out
 
 
+def ai_glossary(a, rows) -> None:
+    """단어표의 AI 풀이: 사용 제한을 확인하고 Claude에 한 번 보낸다(결과는 이 화면에만 저장)."""
+    ss = st.session_state
+    ss.ai_gloss_error = None
+    items = G.ai_items(a, rows)[:MAX_TERMS]
+    chars = sum(len(t) + len(s) + len(k) for t, s, k in items)
+    reason = usage.check(chars, ss.deepl_calls, engine="claude")
+    if reason:
+        ss.ai_gloss_error = reason
+        return
+    with st.spinner("단어 뜻을 풀이하는 중…"):
+        try:
+            got = explain_terms(items, secret("ANTHROPIC_API_KEY"))
+        except T.TranslationError as e:
+            ss.ai_gloss_error = str(e)
+            return
+    usage.record(chars)
+    ss.deepl_calls += 1
+    ss.ai_gloss[text_key(a.text)] = got
+    st.rerun()
+
+
 def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
     """긴 절은 엔진의 한 번 한도 이하 묶음으로 나눠 번역한다."""
     name, key, _ = engine()
@@ -904,13 +935,25 @@ def reading_page() -> None:
     st.markdown('<div class="pp-sub-title">논문 흐름도</div>', unsafe_allow_html=True)
     st.markdown(flow_map(a, tr), unsafe_allow_html=True)
     rows = G.build(a, G.korean_marks(tr))
-    g1, g2 = st.columns([4, 1], vertical_alignment="bottom")
+    meanings = ss.ai_gloss.get(text_key(a.text))
+    if meanings:
+        G.apply_ai(rows, meanings)
+    g1, g2, g3 = st.columns([3, 1.1, 1.1], vertical_alignment="bottom")
     g1.markdown(f'<div class="pp-sub-title">어려운 단어표 · {len(rows)}개</div>', unsafe_allow_html=True)
-    g2.download_button("단어표 내려받기(CSV)", G.to_csv(rows), file_name="paperpath_glossary.csv", mime="text/csv",
+    claude_ok = engine()[0] == "claude"
+    if g2.button("AI로 뜻 풀이 받기", key="ai_gloss_btn", icon=":material/auto_awesome:", use_container_width=True,
+                 disabled=not rows or not claude_ok or bool(meanings),
+                 help=("단어 선정은 정규식, 뜻 풀이만 Claude Haiku가 써요(참고용). 단어와 처음 나온 문장이 Claude로 전송돼요."
+                       if claude_ok else "Claude API 키가 있을 때만 쓸 수 있어요.")):
+        ai_glossary(a, rows)
+    g3.download_button("단어표 내려받기(CSV)", G.to_csv(rows), file_name="paperpath_glossary.csv", mime="text/csv",
                        key="glossary_csv", disabled=not rows, use_container_width=True)
+    if ss.get("ai_gloss_error"):
+        st.warning(ss.ai_gloss_error)
     st.markdown(glossary_table(rows), unsafe_allow_html=True)
-    st.caption("일상 영어에서 드문 단어(전문용어)·약어·모델 이름만 모았어요. 난이도는 일상 영어 빈도 기준"
-               "(wordfreq, Zipf 3.0 미만 '상', 3.0~3.5 '중'). 한국어는 '번역하기'를 누른 뒤 번역기가 옮긴 대응어라 참고용이에요.")
+    st.caption("단어는 정규식과 일상 영어 빈도로 골랐어요: 드문 단어(전문용어)·약어·모델 이름. 난이도는 wordfreq 빈도 기준"
+               "(Zipf 3.0 미만 '상', 3.0~3.5 '중'). '한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이로 "
+               f"둘 다 참고용이에요(AI 풀이는 처음 나온 순서로 {MAX_TERMS}개까지).")
 
     b1, b2 = st.columns(2)
     defined = {k: v for k, v in a.acronyms.items() if v}

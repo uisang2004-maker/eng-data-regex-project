@@ -178,3 +178,14 @@ def test_flow_and_glossary_section(at):
     assert "이해를 돕는 자료" in text and 'class="pp-flow"' in text
     assert "단어표 · " in text and "RAG" in text
     assert any(b.label.startswith("단어표 내려받기") for b in at.get("download_button"))
+
+
+def test_ai_glossary_column_shows_when_present(at):
+    import hashlib
+
+    key = hashlib.sha256(at.session_state["input_text"].encode("utf-8")).hexdigest()[:16]
+    assert "AI 풀이" not in md_text(at).split("어려운 단어표")[-1].split("</table>")[0]
+    at.session_state["ai_gloss"] = {key: {"RAG": "검색 증강 생성"}}
+    at.run()
+    assert "검색 증강 생성" in md_text(at) and "참고용</span>" in md_text(at)
+    assert next(b for b in at.button if b.key == "ai_gloss_btn").disabled      # 키 없음 + 이미 받음

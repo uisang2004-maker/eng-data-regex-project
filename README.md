@@ -91,6 +91,7 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 | 반복 용어 | 이 글에서 3번 이상 나오는 용어(기능어·일반어 제외, 두 단어 용어 우선)에 굵은 글씨와 얇은 밑줄 |
 | 논문 PDF 절 나누기 | `1 Introduction`·`3.2 Pre-training BERT`·`II. RELATED WORK`·`ABSTRACT` 같은 절 제목 줄을 찾음. 번호가 1, 2, 3… 차례로 이어질 때만 받아들이고, 기능어가 많은 줄(번호 각주)·숫자 줄(표)은 제외. `References`에서 멈춤. 각주·그림/표 설명·이메일 줄은 첫머리 정규식으로 뺌 |
 | PDF 글자 정리 | 줄 끝 하이픈은 붙인 단어가 영어 빈도표에 없고 뒤 조각이 단어이면 남김(`fine-tuned`), 작은 대문자 조각 붙이기(`B idirectional` → `Bidirectional`) |
+| 단어표 AI 풀이(선택) | **어떤 단어를 넣을지는 정규식·빈도표가 정하고**, 'AI로 뜻 풀이 받기'를 누르면 그 단어들의 이 논문에서의 뜻만 Claude Haiku가 한국어 한 줄로 씀(JSON 스키마로 받아 보낸 단어만 반영, '참고용' 표시) |
 | 흐름도·어려운 단어표 | 문장 역할(배경→문제→방법→결과→한계)을 이은 흐름도, 일상 영어에서 드문 단어(전문용어)·약어·모델 이름을 난이도와 함께 모은 단어표(CSV 내려받기) |
 
 ## 폴더 구조
@@ -98,7 +99,7 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 | 경로 | 용도 |
 |---|---|
 | `app.py` | Streamlit 화면 |
-| `src/` | `patterns`(규칙) · `clean`(정리·분리) · `extract`(약어·뼈대·표시) · `collect`(arXiv) · `pdf_text`(PDF 글자·2단 순서) · `sections`(절 나누기) · `glossary`(단어표) · `translate`(Claude Haiku·DeepL) · `usage`(사용 제한) · `analyze`(평가) |
+| `src/` | `patterns`(규칙) · `clean`(정리·분리) · `extract`(약어·뼈대·표시) · `collect`(arXiv) · `pdf_text`(PDF 글자·2단 순서) · `sections`(절 나누기) · `glossary`(단어표) · `explain`(단어 AI 풀이) · `translate`(Claude Haiku·DeepL) · `usage`(사용 제한) · `analyze`(평가) |
 | `tests/` | pytest(규칙 양성·음성·경계 사례, 번역 안전장치, 화면 상태) |
 | `data/processed/` | 초록 샘플(CC0), arXiv·번역 캐시 |
 | `docs/` | 계획서, 진행 기록, 체크리스트, 디자인 인계 자료(`design/paperpath-v03`), 스크린샷 |
@@ -124,5 +125,5 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 ## AI 도구 사용
 
 - **Claude Code(Anthropic):** 기획 문서 초안, 정규식·코드·테스트 작성 보조에 사용했습니다. 모든 결정과 컨펌은 이의상이 했고, 테스트는 실제로 실행한 결과만 기록했습니다.
-- **Claude Haiku 5.5(Anthropic API) / DeepL API Free:** 화면의 선택 기능인 영→한 번역에만 사용합니다. 3줄 뼈대·형광펜·밑줄·단어표는 모두 정규식 결과이고 AI가 만들지 않습니다.
+- **Claude Haiku 5.5(Anthropic API) / DeepL API Free:** 화면의 선택 기능인 영→한 번역과, 단어표의 선택 기능인 'AI 풀이(참고용)'에만 사용합니다. 3줄 뼈대·형광펜·밑줄·흐름도와 단어표에 넣을 단어 선정은 모두 정규식 결과이고 AI가 만들지 않습니다.
 - 화면 디자인(v03)은 별도로 만든 디자인 인계 자료(`docs/design/paperpath-v03`)를 기준으로 구현했습니다.
