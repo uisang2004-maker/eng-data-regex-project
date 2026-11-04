@@ -25,6 +25,8 @@ MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
 M_PDF, M_ARXIV, M_PASTE = MODES
 MAX_PASTE = 20000
 MAX_PDF_MB = 20
+READ_MODES = ("side", "pair", "en", "ko")      # 읽기 모드: 한영 나란히 / 문장마다 한영 / 원문만 / 한국어만
+READ_MODE_LABEL = {"side": "한영 나란히", "pair": "문장마다 한영", "en": "영어 원문만", "ko": "한국어만"}
 
 # 화면 예시용으로 직접 작성한 문단(실제 논문 아님). v03 시안과 같은 문장이다.
 DEMO_TEXT = (
@@ -217,6 +219,12 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
+
+/* 읽기 모드: 문장마다 한영 */
+.pp-pair-ko { display:flex; gap:8px; align-items:baseline; margin-top:6px; padding:6px 10px; background:#f6f9fc;
+  border-left:3px solid #9fbbd2; border-radius:6px; color:#34485f; }
+.pp-pair-ko .pp-lang { flex:none; font-size:10px; }
+.st-key-read_mode_bar { margin:2px 0 8px; }
 
 /* 단어표 AI 풀이 칸 */
 .pp-ai { color:#4b3f72; }
@@ -818,7 +826,50 @@ def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
                                use_file_cache=file_cache, api_key=key, caller=limited_caller, engine=name, **layers)
 
 
-def translation_panel(a) -> None:
+def ko_html(res, i: int, a, off=None) -> str:
+    """i번째 문장의 한국어 번역(형광펜·밑줄 포함)과 마스킹 끔 비교 줄."""
+    marks_ko, uls_ko = res.ko_marks or [], res.ko_underlines or []
+    extra = ""
+    if off and off.ko is not None and i < len(off.ko) and off.ko[i] != res.ko[i]:
+        extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
+    body = render_ko(res.ko[i], marks_ko[i] if i < len(marks_ko) else [], a.active_rules,
+                     as_wrappers(uls_ko[i]) if i < len(uls_ko) else None)
+    return f'<div class="pp-text">{body}</div>{extra}'
+
+
+def en_html(a, s, uls) -> str:
+    return f'<div class="pp-text">{render_marked(a.text, s.start, s.end, a.marks, uls.get(s.idx))}</div>'
+
+
+def current_translation(a):
+    """지금 글의 번역 결과(문장별로 짝이 맞은 것만). 번역을 껐거나 아직 없으면 None."""
+    ss = st.session_state
+    res = ss.translations.get((text_key(a.text), True))
+    if not ss.show_translation or res is None or res.ko is None:
+        return None
+    return res
+
+
+def interleaved_panel(a) -> None:
+    """문장마다 한영: 영어 문장 바로 아래에 그 문장의 한국어 번역."""
+    ss = st.session_state
+    res = current_translation(a)
+    off = ss.translations.get((text_key(a.text), False))
+    uls = card_underlines(a)
+    rows = []
+    for s in a.sentences:
+        ko = (f'<div class="pp-pair-ko"><span class="pp-lang">KO</span>{ko_html(res, s.idx, a, off)}</div>'
+              if res and s.idx < len(res.ko) else "")
+        rows.append(f'<div class="pp-sent pp-pair"><div class="pp-no">{s.idx + 1}</div><div>'
+                    f'<div class="pp-pair-en">{en_html(a, s, uls)}</div>{ko}</div></div>')
+    note = "" if res else '<span class="pp-meta"> · 아래 번역 칸에서 번역하면 문장마다 한국어가 붙어요</span>'
+    st.markdown(f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
+                f'<span class="pp-lang">EN·KO</span>문장마다 한영 <span class="pp-meta">· {len(a.sentences)}문장</span>'
+                f'{note}</div></div><div class="pp-sents">{"".join(rows)}</div></div>', unsafe_allow_html=True)
+
+
+def translation_panel(a, rows_on: bool = True) -> None:
+    """한국어 번역 칸. rows_on=False면 번역 문장 없이 버튼·안내·사용량만(문장마다 한영 모드)."""
     ss = st.session_state
     sents = [s.text for s in a.sentences]
     tkey = text_key(a.text)
@@ -859,17 +910,12 @@ def translation_panel(a) -> None:
                     f'{esc(T.ENGINE_LABEL[engine()[0]])}</div>',
                     unsafe_allow_html=True)
         off = ss.translations.get((tkey, False))
-        if res.ko is not None:
-            marks_ko = res.ko_marks or []
-            uls_ko = res.ko_underlines or []
-            rows = []
-            for i, ko in enumerate(res.ko):
-                extra = ""
-                if off and off.ko is not None and i < len(off.ko) and off.ko[i] != ko:
-                    extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
-                rows.append(f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div>'
-                            f'<div><div class="pp-text">{render_ko(ko, marks_ko[i] if i < len(marks_ko) else [], a.active_rules, as_wrappers(uls_ko[i]) if i < len(uls_ko) else None)}</div>{extra}</div></div>')
+        if res.ko is not None and rows_on:
+            rows = [f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div><div>{ko_html(res, i, a, off)}</div></div>'
+                    for i in range(len(res.ko))]
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
+        elif res.ko is not None:
+            st.markdown('<div class="pp-meta">번역 문장은 위 원문 문장마다 바로 아래에 붙었어요.</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)
 
@@ -936,7 +982,7 @@ def reading_page() -> None:
                     unsafe_allow_html=True)
 
     t1, t2, t3 = st.columns([1.4, 2.2, 1], vertical_alignment="center")
-    t1.markdown(sec_head("02", "원문과 번역을 나란히 읽기"), unsafe_allow_html=True)
+    t1.markdown(sec_head("02", "원문과 번역 읽기"), unsafe_allow_html=True)
     c = a.counts
     t2.markdown(f'<div class="pp-chips"><span class="pp-chip blue">약어 {c["abbr"]}</span>'
                 f'<span class="pp-chip amber">추측·가능성 {c["hedge"]}</span>'
@@ -950,18 +996,29 @@ def reading_page() -> None:
     if ss.show_steps:
         steps_panel(a)
 
-    left, right = st.columns([1.13, 0.87])
+    ss.setdefault("read_mode", READ_MODES[0])
+    with st.container(key="read_mode_bar"):
+        st.segmented_control("읽기 모드", READ_MODES, key="read_mode", format_func=lambda m: READ_MODE_LABEL[m],
+                             label_visibility="collapsed")
+    mode = ss.read_mode or READ_MODES[0]       # 같은 버튼을 다시 눌러 선택이 풀려도 기본 모드로 보여 준다
     uls = card_underlines(a)
-    with left:
-        rows = "".join(f'<div class="pp-sent"><div class="pp-no">{s.idx + 1}</div>'
-                       f'<div class="pp-text">{render_marked(a.text, s.start, s.end, a.marks, uls.get(s.idx))}</div></div>'
-                       for s in a.sentences)
-        st.markdown(f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
-                    f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {len(a.sentences)}문장</span></div>'
-                    f'<div class="pp-meta">표현에 마우스를 올리거나 Tab으로 이동하면 정의와 규칙이 보여요</div></div>'
-                    f'<div class="pp-sents">{rows or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>',
-                    unsafe_allow_html=True)
-    with right:
+    rows = "".join(f'<div class="pp-sent"><div class="pp-no">{s.idx + 1}</div>{en_html(a, s, uls)}</div>'
+                   for s in a.sentences)
+    en_panel = (f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
+                f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {len(a.sentences)}문장</span></div>'
+                f'<div class="pp-meta">표현에 마우스를 올리거나 Tab으로 이동하면 정의와 규칙이 보여요</div></div>'
+                f'<div class="pp-sents">{rows or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>')
+    if mode == "side":
+        left, right = st.columns([1.13, 0.87])
+        left.markdown(en_panel, unsafe_allow_html=True)
+        with right:
+            translation_panel(a)
+    elif mode == "pair":
+        interleaved_panel(a)
+        translation_panel(a, rows_on=False)
+    elif mode == "en":
+        st.markdown(en_panel, unsafe_allow_html=True)
+    else:
         translation_panel(a)
 
     st.markdown(sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),

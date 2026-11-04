@@ -189,3 +189,31 @@ def test_ai_glossary_column_shows_when_present(at):
     at.run()
     assert "검색 증강 생성" in md_text(at) and "참고용</span>" in md_text(at)
     assert next(b for b in at.button if b.key == "ai_gloss_btn").disabled      # 키 없음 + 이미 받음
+
+
+def test_reading_modes(at):
+    import hashlib
+
+    from src.extract import analyze
+    from src.translate import TranslationResult
+
+    a = analyze(at.session_state["input_text"])
+    key = (hashlib.sha256(a.text.encode("utf-8")).hexdigest()[:16], True)
+    ko = [f"번역 {i}" for i in range(len(a.sentences))]
+    at.session_state["translations"] = {key: TranslationResult(ko=ko, mode="aligned", ko_marks=[[] for _ in ko],
+                                                               protected=[[]] * len(ko))}
+
+    def view(mode):
+        at.session_state["read_mode"] = mode
+        at.run()
+        assert not at.exception, mode
+        return "\n".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
+
+    side = view("side")
+    assert "영어 원문" in side and 'class="pp-sent pp-ko"' in side
+    pair = view("pair")
+    assert pair.count('class="pp-pair-ko"') == len(a.sentences) and 'class="pp-sent pp-ko"' not in pair
+    en = view("en")
+    assert "영어 원문" in en and 'class="pp-sent pp-ko"' not in en and "pp-pair-ko" not in en
+    ko_only = view("ko")
+    assert 'class="pp-sent pp-ko"' in ko_only and "영어 원문</span>" not in ko_only and "영어 원문 <span" not in ko_only
