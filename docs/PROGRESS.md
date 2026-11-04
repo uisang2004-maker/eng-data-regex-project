@@ -362,3 +362,24 @@
 4. 한계: AI 풀이는 틀릴 수 있어 '참고용'으로 표시. 논문 전체 단어표(00절)에는 아직 붙이지 않음
 5. 스크린샷: `docs/screenshots/phase3-ai-glossary.jpg`
 
+### 2026-11-04 (21) — PDF 앞머리 거르기 보강, 번역 한도 버그, 초록·본문·결론 쪽
+
+1. 이의상 님 요청: PDF에서 메일 주소 같은 필요 없는 정보가 나옴. 4,000자 제한 때문에 논문을 다 번역할 수 없음. 초록·본문(더 나눠도 됨)·결론 쪽으로 나누기.
+2. 원인 조사: 형식이 다른 arXiv 논문 3편(Faster R-CNN IEEE 형식, ViT·Bahdanau ICLR 형식)을 더 받아 7편으로 확인(로컬, 커밋 안 함)
+   - IEEE 저자 각주(`• S. Ren is with University …, Email: …`)가 Introduction에 섞임, `Abstract—…`(같은 줄 초록)를 못 찾음
+   - ICLR의 작은 대문자 제목(`A BSTRACT`, `R EFERENCES`)을 못 찾아 초록이 빠지고 **참고문헌이 결론에 붙음**(ViT 결론 26,571자)
+   - Transformer 초록에 각주(`Equal contribution …`, `Work performed while …`, 학회 이름)가 붙음
+   - 번역 한도: 묶음은 4,000자 이하로 나눴지만, 한도를 셀 때 문장 태그 `<s>`까지 세어 4,232자로 계산돼 막힘
+3. 수정
+   - `src/pdf_text.py`: 줄을 글자 아랫선으로 묶고, 글꼴만 바뀐 붙은 조각은 띄우지 않고 이음(`I`+`NTRODUCTION`). 본문보다 0.9pt 이상 작은 줄에 표시를 붙임
+   - `src/patterns.py` + `src/sections.py`: `EMAIL`, `PDF_FRONT_MATTER`(소속·이메일·교신저자·Index Terms·저작권·학회·Equal contribution 등), `SEC_INLINE_ABSTRACT`, `SMALL_CAPS_HEAD`, 작은 글자 문단 제거(초록 전체가 작은 글자면 예외), 작은 글자 줄은 제목이 될 수 없음, 표 이름 제목(`5 RNNenc-50`) 거름, 대문자 제목을 읽기 쉽게(본문에서 대문자로 쓰인 약어는 유지: `3 BERT`, `Faster R-CNN`)
+   - `paper_pages`: 초록 / 본문 / 결론(Conclusion·Discussion·Limitations·Future Work) 묶기, 감사의 글 제외
+   - `translate.plain_len`: 태그를 뺀 글자 수로 한도를 셈
+   - `app.py`: "00 논문 쪽 고르기"에 초록·본문·결론 버튼, 본문은 절 칩으로 더 나눔. 결론 쪽은 여러 절을 이어서 한 번에 읽음. 절별 요약 표·전체 단어표는 접어 둠
+4. 실행 결과
+   - `py -I -m pytest` **183 passed**(앞머리·작은 글자·제목 대소문자·쪽 묶기·글자 수 테스트 추가)
+   - 7편 모두 이메일·소속·각주가 본문에서 빠지고 초록·참고문헌 경계를 찾음. 예: ViT 결론 26,571자 → 1,216자, Transformer 초록 2,217자 → 1,138자
+   - 화면: Faster R-CNN PDF → 초록·본문(4개 절)·결론. "3 Faster R-CNN"(17,175자, 149문장)을 Claude로 **끝까지 번역**: 묶음 5번, 71초, 149/149 짝 맞음
+5. 한계: 결론 절 제목이 없는 논문(ResNet)은 결론 쪽이 없음(안내 문구 표시). 저자 이름 줄은 앞머리로 버리지만, 절 제목을 하나도 못 찾는 PDF는 이름이 섞일 수 있음
+6. 스크린샷: `docs/screenshots/phase3-paper-pages.jpg`
+

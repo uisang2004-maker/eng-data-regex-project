@@ -459,3 +459,29 @@ PDF_WORDLIKE = re.compile(r"[A-Za-z]{3,}")
 
 SEC_TITLE_FUNCTION = re.compile(r"\b(?:the|a|an|that|this|these|we|our|is|are|was|were|in|of|to|for|with|and|by|on)\b", re.I)
 """절 제목 후보 안의 기능어. 4개 이상이면 제목이 아니라 문장(예: 번호 각주 ``4 We note that in the literature the ...``)."""
+
+SEC_INLINE_ABSTRACT = re.compile(r"^(?:Abstract|ABSTRACT)\s*[—–:.\-]\s*(?P<rest>\S.*)$")
+"""IEEE 형식처럼 같은 줄에서 바로 시작하는 초록: ``Abstract—State-of-the-art object detection ...``."""
+
+SMALL_CAPS_HEAD = re.compile(r"\b([A-Z]) (?=[A-Z]{2,}\b)")
+"""작은 대문자 글꼴 제목에서 첫 글자만 떨어진 것: ``R EFERENCES`` → ``REFERENCES``, ``1 I NTRODUCTION``."""
+
+EMAIL = re.compile(r"(?:\{[\w.,\s-]+\}|[\w.+-]+)@[\w-]+(?:\.[\w-]+)+")
+"""이메일 주소(``{kahe,jiansun}@microsoft.com`` 묶음 형식 포함). 본문에서 지운다."""
+
+PDF_FRONT_MATTER = re.compile(
+    r"(?:\bis\s+(?:now\s+)?with\s+(?:the\s+)?[A-Z]|\bE-?mail\s*:|Corresponding\s+author|Manuscript\s+received|"
+    r"Index\s+Terms\s*[—–:-]|^Keywords?\s*[—–:.-]|Published\s+as\s+a\s+conference\s+paper|"
+    r"©|\bCopyright\b|\bPreprint\b|\bProceedings\s+of\b|\barXiv:\d{4}\.\d{4,5}|\bdoi\.org/|\bDOI\s*:|ORCID|"
+    r"Equal\s+contribution|Work\s+(?:was\s+)?(?:performed|done)\s+(?:while|when|during)|"
+    r"\b(?:Conference|Workshop|Symposium)\s+on\b[^.]{0,80}\b(?:19|20)\d\d\b)",
+    re.I | re.M,
+)
+"""본문이 아닌 앞머리·각주 표시: 소속(``S. Ren is with University ...``), 이메일 표시, 교신저자, 투고일,
+Index Terms·Keywords, 학회·저작권·DOI·arXiv 번호. 이것이 든 짧은 문단(800자 미만)은 통째로 뺀다."""
+
+SEC_CONCLUSION_TITLE = re.compile(r"\b(?:Conclusions?|Concluding|Discussion|Limitations?|Future\s+Work|Summary)\b", re.I)
+"""'결론' 쪽에 모을 절 제목(Conclusion, Discussion, Limitations, Future Work). 나머지 번호 절은 '본문'."""
+
+SEC_ACK_TITLE = re.compile(r"^Acknowledg", re.I)
+"""감사의 글: 독해에 필요 없어 쪽 나누기에서 뺀다."""

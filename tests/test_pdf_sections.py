@@ -74,7 +74,10 @@ def test_empty_pdf_is_error():
 @pytest.mark.parametrize("line,last,want", [
     ("1 Introduction", 0, ("top", "1 Introduction")),
     ("1. Introduction", 0, ("top", "1 Introduction")),
-    ("II. RELATED WORK", 1, ("top", "II RELATED WORK")),
+    ("II. RELATED WORK", 1, ("top", "II Related Work")),
+    ("1 I NTRODUCTION", 0, ("top", "1 Introduction")),                # 작은 대문자 글꼴 조각
+    ("R EFERENCES", 4, ("end", "REFERENCES")),
+    ("5 RNNenc-50", 4, None),                                       # 표 안 모델 이름
     ("3.2 Pre-training BERT", 3, ("sub", "3.2 Pre-training BERT")),
     ("ABSTRACT", 0, ("top", "Abstract")),
     ("References", 5, ("end", "References")),
@@ -142,3 +145,63 @@ def test_engine_limits(tmp_path):
     assert usage.check(3500, 0, path, engine="claude") is None            # Claude: 4,000자
     assert usage.check(100, 59, path, engine="claude") is None
     assert "번까지" in usage.check(100, 60, path, engine="claude")
+
+
+# ---------------------------------------------------------------- 앞머리·저자 정보 거르기, 쪽 묶기
+
+from src.pdf_text import SMALL_MARK
+from src.sections import Paper, Section, nice_title, paper_pages
+
+
+def test_ieee_inline_abstract_and_author_footnotes_removed():
+    lines = ["Fast Thing: A Title", "Alice Kim, Bob Lee", "",
+             "Abstract—We propose a fast detector. It works well.", "",
+             "Index Terms—Object Detection, Region Proposal.", "",
+             "1 INTRODUCTION", "", "Detection is an important task in vision research.", "",
+             "• A. Kim is with University of Somewhere, Seoul.", "E-mail: alice@uni.ac.kr", "",
+             "We contact {alice,bob}@lab.org for code and data. " + "This long paragraph keeps going. " * 30, "",
+             "R EFERENCES", "", "[1] Someone. A paper. 2020."]
+    paper = split_paper(lines)
+    assert [s.title for s in paper.sections] == ["Abstract", "1 Introduction"]
+    assert paper.sections[0].text == "We propose a fast detector. It works well."
+    body = paper.sections[1].text
+    assert "University" not in body and "alice@" not in body and "@lab.org" not in body and "Index Terms" not in body
+    assert "We contact for code and data" in body                 # 긴 문단은 남기고 이메일만 지움
+    assert "Someone" not in body
+
+
+def test_small_font_paragraphs_dropped_except_all_small_abstract():
+    lines = ["ABSTRACT", "", SMALL_MARK + "Our abstract is printed in a small font.", "",
+             "1 Introduction", "", "Body text in the normal font continues here.", "",
+             SMALL_MARK + "∗Equal contribution. Work done while at a lab.", "",
+             SMALL_MARK + "3 We note a footnote that looks like a heading", "", "More body text follows here."]
+    paper = split_paper(lines)
+    assert paper.sections[0].text == "Our abstract is printed in a small font."
+    t = paper.sections[1].text
+    assert "Equal" not in t and "footnote" not in t and "More body text" in t
+    assert [s.title for s in paper.sections] == ["Abstract", "1 Introduction"]
+
+
+def test_nice_title_keeps_acronyms_from_body():
+    keep = frozenset({"BERT", "R-CNN"})
+    assert nice_title("BERT", keep) == "BERT"
+    assert nice_title("RELATED WORK", keep) == "Related Work"
+    assert nice_title("LEARNING TO ALIGN AND TRANSLATE", keep) == "Learning to Align and Translate"
+    assert nice_title("FASTER R-CNN", keep) == "Faster R-CNN"
+    assert nice_title("Mixed Case Title", keep) == "Mixed Case Title"
+
+
+def test_paper_pages_groups_sections():
+    secs = [Section(t, text="x.") for t in ["Abstract", "1 Introduction", "2 Method", "5 Discussion",
+                                           "6 Conclusion", "Acknowledgments"]]
+    pages = paper_pages(Paper("t", secs))
+    assert pages == {"초록": [0], "본문": [1, 2], "결론": [3, 4]}
+    assert "결론" not in paper_pages(Paper("t", secs[:3]))
+
+
+def test_plain_len_ignores_tags_so_chunks_fit_limit():
+    xml = '<s>We <m c="hedge" i="0">may</m> win &amp; lose.</s>'
+    assert T.plain_len(xml) == len("We may win & lose.")
+    sents = [f"Sentence {i} has some words in it." for i in range(200)]
+    for a, b in T.chunk_ranges(sents, 4000):
+        assert T.plain_len(" ".join(f"<s>{s}</s>" for s in sents[a:b])) <= 4000

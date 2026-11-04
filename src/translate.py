@@ -138,6 +138,14 @@ def unprotect(xml_text: str) -> str:
     return unescape(P.X_TAG.sub("", xml_text))
 
 
+TAG = re.compile(r"</?\w+\b[^>]*>")
+
+
+def plain_len(xml_text: str) -> int:
+    """태그를 모두 뺀 글자 수. 사용 한도는 이것으로 센다(문장 태그 <s> 때문에 한도를 넘지 않도록)."""
+    return len(unescape(TAG.sub("", xml_text)))
+
+
 def protected_tokens(xml_text: str) -> list[str]:
     return [unescape(P.X_TAG.sub("", t)) for t in re.findall(r"<x\b[^>]*>(.*?)</x>", xml_text)]
 

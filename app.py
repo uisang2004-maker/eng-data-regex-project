@@ -18,7 +18,7 @@ from src import glossary as G
 from src.explain import MAX_TERMS, explain_terms
 from src.extract import ROLE_ORDER, analyze
 from src.pdf_text import PdfError, extract as extract_pdf
-from src.sections import split_paper
+from src.sections import PAGES as PAPER_PAGES, paper_pages, split_paper
 
 PAGES = ("논문 읽기", "규칙 탐색", "검증 결과")
 MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
@@ -282,6 +282,8 @@ def init_state() -> None:
     ss.setdefault("input_error", None)
     ss.setdefault("deepl_calls", 0)
     ss.setdefault("paper", None)
+    ss.setdefault("paper_cur", "초록")        # PDF 논문에서 지금 보는 쪽(초록·본문·결론)
+    ss.setdefault("body_cur", 0)              # 본문 쪽에서 지금 보는 절 번호
     ss.setdefault("show_input", True)
     ss.setdefault("ai_gloss", {})         # {글 해시: {단어: AI 풀이}} — 이 화면(세션)에만 둔다     # 자료를 넣으면 입력 칸을 닫고, '다시 넣기'로 다시 연다          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
 
@@ -310,15 +312,34 @@ def load_demo() -> None:
     st.session_state.show_input = False
 
 
-def pick_section() -> None:
-    """절 고르기: 고른 절의 본문을 지금 읽는 글로 바꾼다(번역은 절마다 따로 남는다)."""
+def set_view() -> None:
+    """지금 고른 쪽(초록·본문·결론)과 본문 절에 맞춰 읽을 글을 바꾼다. 번역은 글마다 따로 남는다."""
     ss = st.session_state
-    i = ss.section_pick
-    if i is None:                          # 같은 칩을 다시 눌러 선택이 풀리면 지금 절을 유지
-        ss.section_pick = i = ss.source.get("section_idx", 0)
-    sec = ss.paper.sections[i]
-    ss.input_text = sec.text
-    ss.source = {**ss.source, "section": sec.title, "section_idx": i}
+    pages = paper_pages(ss.paper)
+    page = ss.paper_cur if ss.paper_cur in pages else next(iter(pages))
+    ids = pages[page]
+    if page == "본문":
+        ids = [ids[min(ss.body_cur, len(ids) - 1)]]
+    secs = [ss.paper.sections[i] for i in ids]
+    ss.input_text = "\n\n".join(s.text for s in secs)        # 결론 쪽은 Discussion·Conclusion을 이어 붙인다
+    label = page if page != "본문" else f"본문 › {secs[0].title}"
+    if page != "본문":
+        label += " (" + ", ".join(s.title for s in secs) + ")"
+    ss.source = {**ss.source, "section": label, "section_ids": ids, "page": page}
+
+
+def on_page_change() -> None:
+    ss = st.session_state
+    if ss.paper_page is not None:          # 같은 버튼을 다시 눌러 선택이 풀리면 지금 쪽을 유지
+        ss.paper_cur = ss.paper_page
+    set_view()
+
+
+def pick_section() -> None:
+    ss = st.session_state
+    if ss.section_pick is not None:
+        ss.body_cur = ss.section_pick
+    set_view()
 
 
 def set_show_input(on: bool) -> None:
@@ -361,9 +382,11 @@ def load_pdf(data: bytes, name: str) -> str | None:
     paper.notes = [f"PDF {pdf.read_pages}쪽을 읽었어요" + (f"(2단 편집 {pdf.two_column_pages}쪽은 왼쪽 단 → 오른쪽 단 순서로)"
                                                        if pdf.two_column_pages else "") + "."] + pdf.notes + paper.notes
     ss.paper = paper
-    ss.section_pick = 0
-    ss.input_text = paper.sections[0].text
-    ss.source = {"kind": "pdf", "title": paper.title, "section": paper.sections[0].title, "section_idx": 0}
+    ss.paper_cur, ss.body_cur = PAPER_PAGES[0], 0
+    for k in ("paper_page", "section_pick"):     # 앞 논문의 선택 위젯 상태를 지운다
+        ss.pop(k, None)
+    ss.source = {"kind": "pdf", "title": paper.title}
+    set_view()
     ss.show_input = False
     return None
 
@@ -568,12 +591,23 @@ def paper_overview(paper) -> None:
     """PDF 논문 전체 지도: 절 고르기, 절별 요약 표(정규식이 찾은 핵심 문장), 논문 전체 어려운 단어표."""
     ss = st.session_state
     titles = [s.title for s in paper.sections]
-    st.markdown(sec_head("00", "논문 전체 지도", f"{len(titles)}개 절 · 약 {paper.chars:,}자 · 참고문헌·부록·각주·그림/표 설명 제외"),
+    pages = paper_pages(paper)
+    st.markdown(sec_head("00", "논문 쪽 고르기", f"{len(titles)}개 절 · 약 {paper.chars:,}자 · 참고문헌·부록·각주·그림/표·저자 정보 제외"),
                 unsafe_allow_html=True)
     st.markdown(f'<div class="pp-meta"><b>{esc(paper.title)}</b> · {esc(" ".join(paper.notes))}</div>',
                 unsafe_allow_html=True)
-    st.pills("읽을 절 고르기", list(range(len(titles))), format_func=lambda i: titles[i], key="section_pick",
-             on_change=pick_section)
+    with st.container(key="paper_nav"):
+        ss.setdefault("paper_page", ss.source.get("page"))     # 입력 칸을 열었다 닫으면 위젯 상태가 지워져 다시 채운다
+        labels = {p: (f"{p} · {len(ids)}개 절" if p == "본문" else p) for p, ids in pages.items()}
+        st.segmented_control("쪽", list(pages), format_func=labels.get, key="paper_page", on_change=on_page_change,
+                             label_visibility="collapsed")
+        if "결론" not in pages:
+            st.caption("결론·논의 절 제목을 찾지 못해 '결론' 쪽이 없어요. 마지막 본문 절을 확인해 보세요.")
+        if ss.source.get("page") == "본문":
+            body = pages["본문"]
+            ss.setdefault("section_pick", ss.body_cur)
+            st.pills("본문 절 고르기", list(range(len(body))), format_func=lambda j: titles[body[j]], key="section_pick",
+                     on_change=pick_section, label_visibility="collapsed")
 
     analyses = [analyze(s.text) for s in paper.sections]
     rows = []
@@ -583,12 +617,13 @@ def paper_overview(paper) -> None:
         key = "<br>".join(f'<span class="pp-chip blue">{r}</span> {esc(t[:110] + ("…" if len(t) > 110 else ""))}'
                           for r, t in found[:2]) or '<span class="pp-meta">신호 문구로 찾은 문장 없음</span>'
         subs = esc(", ".join(sec.subheads)) or "-"
-        now = ' style="background:#eef4fb"' if i == ss.source.get("section_idx") else ""
+        now = ' style="background:#eef4fb"' if i in ss.source.get("section_ids", []) else ""
         rows.append(f"<tr{now}><td><b>{esc(sec.title)}</b></td><td>{len(a.sentences)}</td><td>{key}</td>"
                     f"<td>{subs}</td></tr>")
-    st.markdown(f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-overview">'
-                f'<thead><tr><th>절</th><th>문장</th><th>신호 문구로 찾은 핵심 문장</th><th>소제목</th></tr></thead>'
-                f'<tbody>{"".join(rows)}</tbody></table></div>', unsafe_allow_html=True)
+    with st.expander("논문 전체 지도 · 절별 핵심 문장과 소제목"):
+        st.markdown(f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-overview">'
+                    f'<thead><tr><th>절</th><th>문장</th><th>신호 문구로 찾은 핵심 문장</th><th>소제목</th></tr></thead>'
+                    f'<tbody>{"".join(rows)}</tbody></table></div>', unsafe_allow_html=True)
 
     with st.expander("논문 전체 어려운 단어표"):
         whole = analyze("\n\n".join(s.text for s in paper.sections))
@@ -744,7 +779,7 @@ def engine_name() -> str:
 def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
     """실제로 번역 API를 부르는 순간에만 사용 제한을 확인하고 센다(캐시에서 답하면 세지 않음)."""
     ss = st.session_state
-    chars = sum(len(T.unprotect(t)) for t in texts)
+    chars = sum(T.plain_len(t) for t in texts)     # 태그(<s>·<m>·<u>)를 뺀 글자 수로 센다
     reason = usage.check(chars, ss.deepl_calls, engine=engine()[0])
     if reason:
         raise T.TranslationError(reason)
