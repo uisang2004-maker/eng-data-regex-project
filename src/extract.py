@@ -55,6 +55,7 @@ class Analysis:
     counts: dict[str, int]
     active_rules: frozenset = field(default_factory=frozenset)
     explanations: list[tuple[int, int, str]] = field(default_factory=list)   # 용어 설명 구간(점선 밑줄)과 툴팁
+    roles: list[str] = field(default_factory=list)   # 문장별 역할(흐름도): background/problem/method/result/limit/detail
 
 
 # ---------------------------------------------------------------- 약어 (P0-3)
@@ -380,6 +381,29 @@ def select_skeleton(sentences: list[Sentence], use_fallback: bool = True) -> tup
     return out, limits
 
 
+# ---------------------------------------------------------------- 문장 역할(흐름도)
+
+ROLE_ORDER = ("background", "problem", "method", "result", "limit")
+
+
+def sentence_roles(sentences: list[Sentence], skeleton: list[SkeletonCard]) -> list[str]:
+    """문장마다 흐름도의 역할을 붙인다.
+
+    3줄 뼈대 카드로 뽑힌 문장은 그 역할(첫 문장 대체 카드는 '배경'), 나머지는 신호 문구로
+    한계 → 방법 → 결과 → 문제 순서로 고른다. 신호가 없으면 첫 문제·방법 문장 앞은 '배경', 뒤는 '보충'.
+    """
+    roles: list[str | None] = [None] * len(sentences)
+    for c in skeleton:
+        if c.sentence_idx is not None:
+            roles[c.sentence_idx] = "background" if (c.kind == "problem" and c.basis == "position") else c.kind
+    checks = (("limit", P.SK_LIMIT), ("method", P.SK_METHOD), ("result", P.SK_RESULT), ("problem", P.SK_PROBLEM))
+    for s in sentences:
+        if roles[s.idx] is None:
+            roles[s.idx] = next((r for r, pat in checks if pat.search(s.text)), None)
+    first_core = next((i for i, r in enumerate(roles) if r in ("problem", "method")), len(roles))
+    return [r or ("background" if i < first_core else "detail") for i, r in enumerate(roles)]
+
+
 # ---------------------------------------------------------------- 전체
 
 def analyze(raw: str, active_rules: frozenset | set | None = None) -> Analysis:
@@ -400,4 +424,5 @@ def analyze(raw: str, active_rules: frozenset | set | None = None) -> Analysis:
         "number": sum(m.category == "number" for m in marks),
         "term": len({m.tip for m in marks if m.category == "term"}),
     }
-    return Analysis(text, cleaned.removed_lines, sentences, acronyms, marks, skeleton, limits, counts, active, explanations)
+    return Analysis(text, cleaned.removed_lines, sentences, acronyms, marks, skeleton, limits, counts, active, explanations,
+                    sentence_roles(sentences, skeleton))

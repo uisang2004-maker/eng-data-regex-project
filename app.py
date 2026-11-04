@@ -14,7 +14,8 @@ from src import translate as T
 from src import usage
 from src.analyze import load_benchmark, skeleton_stats
 from src.collect import ArxivError, fetch_abstract, load_samples
-from src.extract import analyze
+from src import glossary as G
+from src.extract import ROLE_ORDER, analyze
 
 PAGES = ("논문 읽기", "규칙 탐색", "검증 결과")
 MODES = ("arXiv ID", "텍스트 붙여 넣기")
@@ -193,6 +194,21 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-snip { color:#678096; font-family:ui-monospace, Consolas, monospace; font-size:11.5px; background:#f5f8fa; padding:3px 6px; border-radius:5px; }
 .pp-foot { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:6px 2px 0; color:#60758a; font-size:12px; }
 .pp-foot strong { color:#52697f; }
+
+/* 이해를 돕는 자료: 흐름도 */
+.pp-sub-title { font-size:14px; font-weight:780; color:#2c4560; margin:6px 0 6px; }
+.pp-flow { display:flex; gap:6px; align-items:stretch; flex-wrap:wrap; }
+.pp-flow-step { flex:1 1 170px; background:var(--surface); border:1px solid var(--line); border-top:3px solid #9aa8b6;
+  border-radius:12px; padding:10px 12px; box-shadow:var(--shadow); }
+.pp-flow-step.blue { border-top-color:#6c9dbb; } .pp-flow-step.teal { border-top-color:#3a9c92; }
+.pp-flow-step.violet { border-top-color:#8b79b5; }
+.pp-flow-head { display:flex; align-items:center; gap:5px; font-size:13px; color:#2c4560; margin-bottom:6px; }
+.pp-flow-no { font-size:10.5px; font-weight:750; color:#60758a; background:#f1f5f8; border-radius:5px; padding:1px 5px; }
+.pp-flow-text { font-size:13px; color:#34485f; line-height:1.55; }
+.pp-flow-ko { font-size:12px; color:#5c7084; margin-top:5px; line-height:1.5; }
+.pp-flow-arrow { align-self:center; color:#9aa8b6; font-size:18px; font-weight:700; }
+.pp-flow-note { color:#60758a; font-size:12px; margin-top:6px; }
+@media (max-width: 900px) { .pp-flow-arrow { display:none; } }
 
 /* 단계 보기·규칙 */
 .pp-steps { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
@@ -390,6 +406,54 @@ def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
             f'<span class="pp-kdot"></span>{title}</div><div class="pp-basis {basis_cls}" title="{esc(basis_tip)}">'
             f'{esc(basis)}</div></div>'
             f'{body}<div class="pp-reason">{ICON["info"]}<span>{esc(card.reason)}</span></div></div>')
+
+
+ROLE_META = {"background": ("배경", "gray"), "problem": ("문제", "blue"), "method": ("방법", "teal"),
+             "result": ("결과", "violet"), "limit": ("한계", "gray")}
+
+
+def flow_map(a, tr=None) -> str:
+    """논문 흐름도: 문장 역할(배경 → 문제 → 방법 → 결과 → 한계)을 순서대로 이어 보여 준다."""
+    uls = {c.sentence_idx: c.underline for c in a.skeleton if c.sentence_idx is not None and c.underline}
+    steps = []
+    for role in ROLE_ORDER:
+        idxs = [i for i, r in enumerate(a.roles) if r == role]
+        if not idxs:
+            continue
+        name, color = ROLE_META[role]
+        i = idxs[0]
+        s = a.sentences[i].text
+        if i in uls:
+            snippet = s[uls[i][0]:uls[i][1]]
+        else:
+            words = s.split()
+            snippet = " ".join(words[:14]) + (" …" if len(words) > 14 else "")
+        ko = ""
+        if tr and tr.ko and i < len(tr.ko):
+            k = tr.ko[i]
+            ko = f'<div class="pp-flow-ko">{esc(k[:60] + ("…" if len(k) > 60 else ""))}</div>'
+        nums = "".join(f'<span class="pp-flow-no">{j + 1}</span>' for j in idxs)
+        steps.append(f'<div class="pp-flow-step {color}"><div class="pp-flow-head"><b>{name}</b>{nums}</div>'
+                     f'<div class="pp-flow-text">{esc(snippet)}</div>{ko}</div>')
+    if not steps:
+        return '<div class="pp-meta">문장이 없어요.</div>'
+    detail = [i + 1 for i, r in enumerate(a.roles) if r == "detail"]
+    note = (f'<div class="pp-flow-note">보충 문장: {", ".join(f"문장 {j}" for j in detail)} '
+            f'(신호 문구가 없어 흐름 단계로 분류하지 않았어요)</div>') if detail else ""
+    arrow = '<div class="pp-flow-arrow" aria-hidden="true">→</div>'
+    return f'<div class="pp-flow">{arrow.join(steps)}</div>{note}'
+
+
+def glossary_table(rows) -> str:
+    if not rows:
+        return '<div class="pp-meta">이 글에서 정리할 용어를 찾지 못했어요.</div>'
+    body = "".join(
+        f"<tr><td><b>{esc(e.term)}</b></td><td>{esc(', '.join(G.KIND_LABEL[k] for k in e.kinds))}</td>"
+        f"<td>{e.count}</td><td>{('문장 ' + str(e.first_sentence)) if e.first_sentence else '-'}</td>"
+        f"<td>{esc(e.explanation) or '-'}</td><td>{esc(e.korean) or '-'}</td></tr>" for e in rows)
+    return (f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table"><thead><tr>'
+            f'<th>용어</th><th>종류</th><th>횟수</th><th>처음 나온 곳</th><th>풀네임·설명(원문)</th><th>한국어</th>'
+            f'</tr></thead><tbody>{body}</tbody></table></div>')
 
 
 def sec_head(num: str, title: str, note: str = "") -> str:
@@ -644,6 +708,19 @@ def reading_page() -> None:
                     unsafe_allow_html=True)
     with right:
         translation_panel(a)
+
+    st.markdown(sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),
+                unsafe_allow_html=True)
+    tr = ss.translations.get((text_key(a.text), True))
+    st.markdown('<div class="pp-sub-title">논문 흐름도</div>', unsafe_allow_html=True)
+    st.markdown(flow_map(a, tr), unsafe_allow_html=True)
+    rows = G.build(a, G.korean_marks(tr))
+    g1, g2 = st.columns([4, 1], vertical_alignment="bottom")
+    g1.markdown(f'<div class="pp-sub-title">단어표 · {len(rows)}개</div>', unsafe_allow_html=True)
+    g2.download_button("단어표 내려받기(CSV)", G.to_csv(rows), file_name="paperpath_glossary.csv", mime="text/csv",
+                       key="glossary_csv", disabled=not rows, use_container_width=True)
+    st.markdown(glossary_table(rows), unsafe_allow_html=True)
+    st.caption("약어·반복 용어·설명된 용어를 모았어요. 한국어는 '번역하기'를 누른 뒤 번역기가 옮긴 대응어라 참고용이에요.")
 
     b1, b2 = st.columns(2)
     defined = {k: v for k, v in a.acronyms.items() if v}

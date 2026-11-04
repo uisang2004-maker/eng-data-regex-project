@@ -140,3 +140,10 @@ def test_translation_blocked_after_session_limit(at, monkeypatch, tmp_path):
     at.button(key="translate_btn").click().run()
     assert not at.exception
     assert any("번까지" in w.value for w in at.warning)
+
+
+def test_flow_and_glossary_section(at):
+    text = md_text(at)
+    assert "이해를 돕는 자료" in text and 'class="pp-flow"' in text
+    assert "단어표 · " in text and "RAG" in text
+    assert any(b.label.startswith("단어표 내려받기") for b in at.get("download_button"))
