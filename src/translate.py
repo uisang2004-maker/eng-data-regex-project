@@ -1,4 +1,6 @@
-"""영어 문장 → 한국어 번역 (DeepL API Free) + 정규식 보호 마스킹.
+"""영어 문장 → 한국어 번역 (Claude Haiku 5.5 또는 DeepL API Free) + 정규식 보호 마스킹.
+
+- 번역 엔진: ANTHROPIC_API_KEY가 있으면 Claude Haiku 5.5(AI 번역), 없으면 DeepL. 둘 다 같은 태그 방식을 쓴다.
 
 - 보호: 약어·인용·참조·수치·URL·수식을 정규식으로 찾아 <x>…</x>로 감싸 DeepL의 ignore_tags로 보낸다.
 - 정렬: 문단을 한 번에 보내되 문장마다 <s>…</s>를 씌우고, 결과에서 <s>를 정규식으로 다시 찾아 짝을 짓는다.
@@ -211,12 +213,12 @@ def fix_korean(text: str) -> str:
 
 # ---------------------------------------------------------------- DeepL 호출
 
-def load_api_key() -> str | None:
-    key = os.environ.get("DEEPL_API_KEY")
+def load_api_key(name: str = "DEEPL_API_KEY") -> str | None:
+    key = os.environ.get(name)
     env = ROOT / ".env"
     if not key and env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
-            m = re.match(r"\s*DEEPL_API_KEY\s*=\s*['\"]?([^'\"\s]+)", line)
+            m = re.match(rf"\s*{name}\s*=\s*['\"]?([^'\"\s]+)", line)
             if m:
                 key = m.group(1)
     return key or None
@@ -239,6 +241,73 @@ def call_deepl(texts: list[str], api_key: str, split_sentences: str) -> list[str
     return [t["text"] for t in data["translations"]]
 
 
+# ---------------------------------------------------------------- Claude Haiku (AI 번역)
+
+CLAUDE_MODEL = "claude-haiku-5-5"
+CLAUDE_SYSTEM = """You translate English academic text into Korean for undergraduate students reading their first papers.
+The input is XML-like markup. Follow these rules exactly:
+1. Translate every <s>...</s> segment. Output exactly the same number of <s> segments, in the same order, one Korean
+   translation per segment. Never merge, split, drop or add segments.
+2. Keep every other tag (<x ...>, <m ...>, <u ...>) with exactly the same attributes. Wrap the Korean words that
+   correspond to the tagged English words with the same <m> or <u> tag. Copy the content of <x> tags unchanged
+   (do not translate it).
+3. Translate faithfully: do not summarize, explain, or add information that is not in the English text.
+4. Use one consistent formal written style that ends sentences with "-다".
+5. Output only the translated markup, with nothing before or after it."""
+
+
+def _claude_one(xml: str, api_key: str, client=None) -> str:
+    import anthropic
+
+    client = client or anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=60.0)
+    try:
+        resp = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=CLAUDE_SYSTEM,
+            thinking={"type": "disabled"},        # 번역은 깊은 추론이 필요 없어 생각 토큰을 쓰지 않는다
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": xml}],
+        )
+    except anthropic.AuthenticationError as e:
+        raise TranslationError("Claude API 키를 확인할 수 없어요(ANTHROPIC_API_KEY).", 403) from e
+    except anthropic.PermissionDeniedError as e:
+        raise TranslationError("Claude API 사용 권한이나 결제 설정을 확인해 주세요.", 403) from e
+    except anthropic.RateLimitError as e:
+        raise TranslationError(ERROR_MESSAGES[429], 429) from e
+    except anthropic.APIStatusError as e:
+        raise TranslationError(f"Claude 오류(HTTP {e.status_code})로 번역하지 못했어요.", e.status_code) from e
+    except anthropic.APIConnectionError as e:
+        raise TranslationError("Claude에 연결하지 못했어요. 번역을 잠시 사용할 수 없어요.") from e
+    if resp.stop_reason == "refusal":
+        raise TranslationError("AI 번역이 이 글을 번역하지 않았어요. 독해 표시는 그대로 볼 수 있어요.")
+    if resp.stop_reason == "max_tokens":
+        raise TranslationError("글이 길어 AI 번역이 중간에 끊겼어요. 더 짧은 부분으로 나눠 주세요.")
+    return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+
+def call_claude(texts: list[str], api_key: str, split_sentences: str, client=None) -> list[str]:
+    """DeepL 호출과 같은 모양. 문단 한 번에(<s> 묶음) 보내고, 문장별 대체일 때는 문장마다 보낸다."""
+    if split_sentences == "0":
+        out = []
+        for t in texts:
+            got = _claude_one(f"<s>{t}</s>", api_key, client)
+            parts = P.SENT_TAG.findall(got)
+            out.append(parts[0] if len(parts) == 1 else got)
+        return out
+    return [_claude_one(t, api_key, client) for t in texts]
+
+
+ENGINE_LABEL = {"claude": "Claude Haiku 5.5 · AI 번역(참고용)", "deepl": "DeepL"}
+
+
+def pick_engine(claude_key: str | None, deepl_key: str | None) -> tuple[str, str | None, Callable]:
+    """쓸 번역 엔진을 고른다: Claude 키가 있으면 Claude Haiku, 없으면 DeepL."""
+    if claude_key:
+        return "claude", claude_key, call_claude
+    return "deepl", deepl_key, call_deepl
+
+
 # ---------------------------------------------------------------- 캐시
 
 def _load_cache() -> dict:
@@ -253,8 +322,9 @@ def _save_cache(cache: dict) -> None:
     CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
 
 
-def cache_key(xmls: list[str], masked: bool) -> str:
-    return hashlib.sha256(("M" if masked else "U").encode() + "\x1f".join(xmls).encode("utf-8")).hexdigest()[:20]
+def cache_key(xmls: list[str], masked: bool, engine: str = "deepl") -> str:
+    head = ("M" if masked else "U") + ("" if engine == "deepl" else f"|{engine}")   # DeepL은 예전 키와 같게 유지
+    return hashlib.sha256(head.encode() + "\x1f".join(xmls).encode("utf-8")).hexdigest()[:20]
 
 
 # ---------------------------------------------------------------- 번역
@@ -265,7 +335,8 @@ Caller = Callable[[list[str], str, str], list[str]]
 def translate(sentences: list[str], acronyms: dict[str, str | None] | None = None, masked: bool = True,
               api_key: str | None = None, caller: Caller = call_deepl, use_file_cache: bool = True,
               marks: list[list[Mark]] | None = None,
-              underlines: list[Underline | None] | None = None) -> TranslationResult:
+              underlines: list[Underline | None] | None = None,
+              engine: str = "deepl") -> TranslationResult:
     """문장 목록을 번역한다. 오류가 나도 예외를 올리지 않고 TranslationResult.error에 담는다.
 
     marks를 주면(문장별 영어 형광펜 구간) 한국어 쪽 형광펜 위치(ko_marks)도,
@@ -278,7 +349,7 @@ def translate(sentences: list[str], acronyms: dict[str, str | None] | None = Non
     xmls = [to_xml(s, acronyms, masked, mk, ul) for s, mk, ul in zip(sentences, marks, underlines)]
     tokens = [protected_tokens(x) if masked else [] for x in xmls]
     en_phrases = [[s[a:b] for a, b, _ in mk] for s, mk in zip(sentences, marks)]
-    key = cache_key(xmls, masked)
+    key = cache_key(xmls, masked, engine)
     cache = _load_cache() if use_file_cache else {}
     def finish(raw: list[str]) -> tuple[list[str], list, list]:
         ko = [fix_korean(unprotect(r)) for r in raw]

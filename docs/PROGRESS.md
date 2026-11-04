@@ -304,3 +304,14 @@
 3. 파일: `src/glossary.py`(빈도표·난이도·어려운 단어 수집·한국어 조사 정리), `app.py`(어려운 단어 태그를 번역 요청에 함께 보냄, 난이도 열, 좁은 화면 줄바꿈), `data/processed/en_word_zipf.tsv`, `tests/test_aids.py`, README(데이터 출처), 번역 캐시, 스크린샷.
 4. 실행 결과: `py -I -m pytest` **140 passed**. 예시 문단을 다시 번역함(약 470자 × 2회: 기준값 변경 전후). 단어표 = RAG, contextual(중, 문맥적), reranking(상, 재순위), reranker(상, 재순위 지정기). 화면에서 확인함.
 5. 한계: 일상어인데 논문에서 특별한 뜻으로 쓰는 단어(attention 등)는 빠짐.
+
+### 2026-11-04 (16) — AI 번역 엔진(Claude Haiku 5.5)
+
+1. 이의상 님 결정: DeepL 무료 한도 대신 AI 번역을 쓰기로 하고 모델은 "Haiku로 하자"(Claude Haiku 5.5, 입력 100만 토큰당 $0.10 / 출력 $0.50).
+2. 구현
+   - `src/translate.py`: `call_claude`(DeepL 호출과 같은 모양, 문단을 `<s>` 묶음 한 번에 보냄), 시스템 지시(문장 수·태그·속성 유지, `<x>` 내용 그대로, 요약·추가 금지, "-다" 말투), 생각 끔·effort low, 오류(키·권한·한도·연결·거절·중간 끊김)를 한국어 안내로 바꿈. `pick_engine`(Claude 키가 있으면 Claude, 없으면 DeepL). 캐시 키에 엔진 이름을 넣되 DeepL은 예전 키와 같게 유지
+   - `app.py`: 엔진 자동 선택, 전송 안내·출처 표시를 엔진에 맞게 바꿈, 사용 제한은 엔진과 상관없이 그대로 적용
+   - `requirements.txt`: `anthropic==2.4.0`
+3. 실행 결과: `py -I -m pytest` **146 passed**(가짜 클라이언트 테스트 6개 추가, 네트워크 없음). 실제 Claude 호출은 아직 하지 않음(키 없음).
+4. 막힌 것: Anthropic API 키. 이의상 님이 직접 발급·결제·월 한도 설정 후 `.env`와 Streamlit Secrets에 넣어야 함. 키가 들어오기 전까지 공개 사이트는 DeepL로 동작.
+5. 다음: 키가 들어오면 예시 문단과 초록 몇 편으로 번역 품질·태그 복원율·비용을 측정해 기록.

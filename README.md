@@ -24,25 +24,27 @@ py -m venv .venv
 
 ### 번역(선택)
 
-번역은 DeepL API Free를 씁니다. 키가 없어도 정규식 기능은 모두 동작하고, 예시 문단은 저장된 번역으로 볼 수 있습니다.
+번역 엔진은 두 가지입니다. `ANTHROPIC_API_KEY`가 있으면 **Claude Haiku 5.5**(`claude-haiku-5-5`, AI 번역, 유료)를 쓰고, 없으면 **DeepL API Free**를 씁니다. 두 엔진 모두 같은 태그 방식(보호 `<x>`, 형광펜 `<m>`, 밑줄 `<u>`, 문장 `<s>`)으로 보내고 정규식으로 복원합니다. 키가 없어도 정규식 기능은 모두 동작하고, 예시 문단은 저장된 번역으로 볼 수 있습니다.
 
 1. `cp .env.example .env`
-2. `.env`에 `DEEPL_API_KEY=<본인 키>`를 적습니다. **`.env`는 커밋되지 않습니다.**
-3. 번역은 화면의 **번역하기** 버튼을 눌렀을 때만 호출됩니다. 입력한 영어 문장이 DeepL로 전송됩니다.
+2. `.env`에 `ANTHROPIC_API_KEY=<본인 키>` 또는 `DEEPL_API_KEY=<본인 키>`를 적습니다. **`.env`는 커밋되지 않습니다.**
+3. 번역은 화면의 **번역하기** 버튼을 눌렀을 때만 호출됩니다. 입력한 영어 문장이 고른 번역 서비스로 전송됩니다.
+
+Claude API 키는 [console.anthropic.com](https://console.anthropic.com)에서 만들며 무료 등급이 없습니다. 콘솔의 월 사용 한도(spend limit)를 낮게 걸어 두는 것을 권장합니다. Haiku 5.5 요금은 입력 100만 토큰당 $0.10, 출력 $0.50입니다.
 
 ### 공개 사이트로 배포 (Streamlit Community Cloud)
 
 1. [share.streamlit.io](https://share.streamlit.io)에 GitHub 계정으로 로그인합니다.
 2. **Create app** → **Yup, I have an app** → 저장소 `uisang2004-maker/eng-data-regex-project`, 브랜치 `main`, 파일 `app.py`를 고릅니다.
-3. **Advanced settings**에서 Python 3.12를 고르고, **Secrets** 칸에 `DEEPL_API_KEY = "본인 키"`를 적습니다. 키는 이 칸에만 적고 저장소에는 넣지 않습니다.
+3. **Advanced settings**에서 Python 3.12를 고르고, **Secrets** 칸에 `ANTHROPIC_API_KEY = "본인 키"`(또는 `DEEPL_API_KEY = "본인 키"`)를 적습니다. 키는 이 칸에만 적고 저장소에는 넣지 않습니다.
 4. **Deploy**를 누릅니다. 비공개 저장소에서 만든 앱은 처음에 비공개라서, 앱의 **Share → Make this app public**으로 공개합니다.
 
-공개 사이트의 번역은 DeepL 무료 한도를 지키기 위해 제한됩니다([src/usage.py](src/usage.py)).
+공개 사이트의 번역은 비용과 무료 한도를 지키기 위해 제한됩니다([src/usage.py](src/usage.py)).
 - 한 번에 3,000자까지
 - 한 화면(세션)당 10회
 - 사이트 전체 하루 30,000자
 
-하루 사용량은 서버 파일로 세기 때문에, 서버가 재시작되면 다시 0부터 셀 수 있습니다. 실제 기준은 DeepL 계정의 사용량입니다.
+하루 사용량은 서버 파일로 세기 때문에, 서버가 재시작되면 다시 0부터 셀 수 있습니다. 실제 기준은 번역 서비스 계정(Anthropic 콘솔·DeepL)의 사용량입니다.
 
 ### 테스트
 
@@ -89,7 +91,7 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 | 경로 | 용도 |
 |---|---|
 | `app.py` | Streamlit 화면 |
-| `src/` | `patterns`(규칙) · `clean`(정리·분리) · `extract`(약어·뼈대·표시) · `collect`(arXiv) · `translate`(DeepL) · `analyze`(평가) |
+| `src/` | `patterns`(규칙) · `clean`(정리·분리) · `extract`(약어·뼈대·표시) · `collect`(arXiv) · `translate`(Claude Haiku·DeepL) · `analyze`(평가) |
 | `tests/` | pytest(규칙 양성·음성·경계 사례, 번역 안전장치, 화면 상태) |
 | `data/processed/` | 초록 샘플(CC0), arXiv·번역 캐시 |
 | `docs/` | 계획서, 진행 기록, 체크리스트, 디자인 인계 자료(`design/paperpath-v03`), 스크린샷 |
@@ -101,18 +103,18 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 
 - arXiv 메타데이터(제목·초록)는 CC0 1.0입니다. 저자 정보는 수집하지 않습니다.
 - 붙여 넣은 텍스트와 그 번역은 저장하지 않습니다. 예시 문단과 arXiv 초록의 번역만 캐시 파일에 남깁니다.
-- DeepL 무료 등급의 데이터 보관 여부는 확인하지 못했습니다. 번역 전에 화면에서 전송 사실을 안내합니다.
+- 번역 서비스(Anthropic·DeepL) 측의 데이터 보관은 각 서비스의 약관을 따르며, 이 앱이 따로 확인하지는 못했습니다. 번역 전에 화면에서 전송 사실을 안내합니다.
 
 ## 한계
 
 - 샘플은 연도별 연말 최신 제출 50편이라 대표성이 없습니다.
 - `XGBoost`·`BiLSTM`·`k-NN` 같은 약어는 풀네임을 찾지 못합니다(틀린 풀네임을 만들지 않고 "정의를 찾지 못함"으로 표시).
 - 추측 표시는 조동사 자체를 표시하며, 문장을 넘는 문맥은 보지 않습니다.
-- 번역은 말투(~습니다/~한다)가 섞일 수 있습니다.
+- 번역은 말투(~습니다/~한다)가 섞일 수 있습니다. AI 번역(Claude)은 드물게 뜻을 바꾸거나 빼먹을 수 있어 참고용입니다.
 - PDF 2단 편집 순서는 복원하지 않습니다. arXiv ID 입력을 권장합니다.
 
 ## AI 도구 사용
 
 - **Claude Code(Anthropic):** 기획 문서 초안, 정규식·코드·테스트 작성 보조에 사용했습니다. 모든 결정과 컨펌은 이의상이 했고, 테스트는 실제로 실행한 결과만 기록했습니다.
-- **DeepL API Free:** 화면의 선택 기능인 영→한 번역에 사용합니다.
+- **Claude Haiku 5.5(Anthropic API) / DeepL API Free:** 화면의 선택 기능인 영→한 번역에만 사용합니다. 3줄 뼈대·형광펜·밑줄·단어표는 모두 정규식 결과이고 AI가 만들지 않습니다.
 - 화면 디자인(v03)은 별도로 만든 디자인 인계 자료(`docs/design/paperpath-v03`)를 기준으로 구현했습니다.

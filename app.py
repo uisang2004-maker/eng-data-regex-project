@@ -516,7 +516,7 @@ def input_panel() -> None:
             clicked = st.button("초록 불러오기" if mode == MODES[0] else "분석하기", type="primary",
                                 use_container_width=True, key="load_btn")
         c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>붙여 넣은 텍스트는 저장하지 않아요.<br>'
-                    f'번역 시 DeepL로 전송됨을 미리 안내합니다.</span></div>', unsafe_allow_html=True)
+                    f'번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>', unsafe_allow_html=True)
         if mode == MODES[1]:
             st.text_area("영어 텍스트", key="paste_text", height=150, label_visibility="collapsed",
                          placeholder="영어 논문 초록이나 단락을 붙여 넣으세요. PDF 복사 잔재(줄바꿈·쪽번호·머리말)는 자동으로 정리해요.")
@@ -559,7 +559,7 @@ def steps_panel(a) -> None:
             ("③ 약어 탐지", f"후보 {len(a.acronyms)}개, 풀네임 {n_def}개"),
             ("④ 뼈대 선택", picks),
             ("⑤ 추측·확신·참조", f"추측 {a.counts['hedge']} · 확신 {a.counts['confident']} · 참조 {a.counts['reference']}"),
-            ("⑥ 번역(선택)", "버튼을 눌렀을 때만 DeepL 호출"),
+            ("⑥ 번역(선택)", "버튼을 눌렀을 때만 번역 API 호출(Claude Haiku 또는 DeepL)"),
         ]
         st.markdown('<div class="pp-steps">' + "".join(f'<div class="pp-step"><b>{esc(t)}</b><span>{esc(d)}</span></div>'
                                                         for t, d in steps) + "</div>", unsafe_allow_html=True)
@@ -569,26 +569,41 @@ def steps_panel(a) -> None:
         rule_toggles()
 
 
-def deepl_key() -> str | None:
+def secret(name: str) -> str | None:
     """배포 사이트는 Streamlit 비밀값(st.secrets), 로컬은 .env에서 키를 읽는다. 키 값은 화면·로그에 내보내지 않는다."""
     try:
-        key = st.secrets.get("DEEPL_API_KEY")
+        key = st.secrets.get(name)
     except Exception:          # 로컬에 secrets.toml이 없으면 예외가 난다
         key = None
-    return key or T.load_api_key()
+    return key or T.load_api_key(name)
+
+
+def engine():
+    """번역 엔진: Claude 키가 있으면 Claude Haiku 5.5, 없으면 DeepL."""
+    return T.pick_engine(secret("ANTHROPIC_API_KEY"), secret("DEEPL_API_KEY"))
+
+
+def engine_name() -> str:
+    return "Claude(Anthropic) API" if engine()[0] == "claude" else "DeepL API"
 
 
 def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
-    """실제로 DeepL을 부르는 순간에만 사용 제한을 확인하고 센다(캐시에서 답하면 세지 않음)."""
+    """실제로 번역 API를 부르는 순간에만 사용 제한을 확인하고 센다(캐시에서 답하면 세지 않음)."""
     ss = st.session_state
     chars = sum(len(T.unprotect(t)) for t in texts)
     reason = usage.check(chars, ss.deepl_calls)
     if reason:
         raise T.TranslationError(reason)
-    out = T.call_deepl(texts, key, split)
+    out = engine()[2](texts, key, split)
     usage.record(chars)
-    ss.deepl_calls += 1
+    ss.deepl_calls += 1            # 엔진과 상관없이 이 화면의 번역 호출 수
     return out
+
+
+def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
+    name, key, _ = engine()
+    return T.translate(sents, a.acronyms, masked=masked, use_file_cache=file_cache, api_key=key,
+                       caller=limited_caller, engine=name, **layers)
 
 
 def translation_panel(a) -> None:
@@ -609,14 +624,13 @@ def translation_panel(a) -> None:
 
         res = ss.translations.get((tkey, True))
         if res is None:
-            st.markdown('<div class="pp-notice"><b>번역하기</b>를 누르면 위 영어 문장이 <b>DeepL API로 전송</b>돼요. '
-                        '이 앱은 입력을 저장하지 않지만, DeepL 측의 보관 여부는 확인하지 못했어요. 개인정보는 넣지 마세요.</div>',
-                        unsafe_allow_html=True)
+            st.markdown(f'<div class="pp-notice"><b>번역하기</b>를 누르면 위 영어 문장이 <b>{engine_name()}로 전송</b>돼요. '
+                        '이 앱은 입력을 저장하지 않지만, 번역 서비스 측의 보관 정책은 그 서비스의 약관을 따라요. '
+                        '개인정보는 넣지 마세요.</div>', unsafe_allow_html=True)
             if st.button("번역하기", type="primary", key="translate_btn"):
                 with st.spinner("번역하는 중…"):
-                    ss.translations[(tkey, True)] = T.translate(sents, a.acronyms, masked=True, use_file_cache=file_cache,
-                                                                api_key=deepl_key(), caller=limited_caller,
-                                                                **dict(zip(("marks", "underlines"), translation_layers(ss.input_text))))
+                    ss.translations[(tkey, True)] = run_translate(
+                        sents, a, True, file_cache, **dict(zip(("marks", "underlines"), translation_layers(ss.input_text))))
                 st.rerun()
             return
 
@@ -629,7 +643,8 @@ def translation_panel(a) -> None:
 
         mode_note = {"aligned": "원문 문장과 1:1 연결 · 문단 + 문장 태그", "per_sentence": "원문 문장과 1:1 연결 · 문장별 전송",
                      "paragraph": "문장 수가 맞지 않아 문단 단위로 보여 줘요"}[res.mode]
-        st.markdown(f'<div class="pp-meta">{esc(mode_note)}{" · 저장된 번역" if res.cached else ""} · DeepL</div>',
+        st.markdown(f'<div class="pp-meta">{esc(mode_note)}{" · 저장된 번역" if res.cached else ""} · '
+                    f'{esc(T.ENGINE_LABEL[engine()[0]])}</div>',
                     unsafe_allow_html=True)
         off = ss.translations.get((tkey, False))
         if res.ko is not None:
@@ -647,10 +662,9 @@ def translation_panel(a) -> None:
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)
 
         if off is None:
-            if st.button("마스킹 끔과 비교", key="compare_btn", help="보호 마스킹 없이 한 번 더 번역해 차이를 보여 줘요(DeepL 추가 호출)"):
+            if st.button("마스킹 끔과 비교", key="compare_btn", help="보호 마스킹 없이 한 번 더 번역해 차이를 보여 줘요(번역 API 추가 호출)"):
                 with st.spinner("마스킹 없이 번역하는 중…"):
-                    ss.translations[(tkey, False)] = T.translate(sents, a.acronyms, masked=False, use_file_cache=file_cache,
-                                                                 api_key=deepl_key(), caller=limited_caller)
+                    ss.translations[(tkey, False)] = run_translate(sents, a, False, file_cache)
                 st.rerun()
         elif off.ko is None:
             st.warning(off.error or "비교 번역을 만들지 못했어요.")
@@ -775,7 +789,7 @@ def rules_page() -> None:
                 ("③ 약어", "괄호 안 후보(regex) → 글자 맞추기(Python)"),
                 ("④ 3줄 뼈대", "신호 문구 → 위치 대체(추정 표시)"),
                 ("⑤ 추측·확신·참조", "단일 등급 + 가능·허용 제외"),
-                ("⑥ 번역(선택)", "보호 마스킹 → DeepL → 태그로 짝 복원"),
+                ("⑥ 번역(선택)", "보호 마스킹 → Claude Haiku 또는 DeepL → 태그로 짝 복원"),
             ]) + "</div>", unsafe_allow_html=True)
         st.markdown("**규칙 켜고 끄기 미리보기**")
         rule_toggles()
@@ -859,7 +873,8 @@ def validation_page() -> None:
         "- 추측 표시는 조동사 자체를 표시하며, 문장을 넘는 문맥은 보지 않아요.\n"
         "- 번역은 말투(~습니다/~한다)가 섞일 수 있어요.\n"
         "- PDF 2단 편집 순서는 복원하지 않아요. arXiv ID 입력을 권장해요.\n"
-        "- DeepL 무료 등급의 데이터 보관 여부는 확인하지 못했어요.")
+        "- 번역은 Claude Haiku 5.5(AI 번역, 키가 있을 때) 또는 DeepL이 해요. AI 번역은 드물게 뜻을 바꾸거나 빼먹을 수 있어 참고용이에요.\n"
+        "- 번역 서비스 측의 데이터 보관은 각 서비스의 약관을 따르며, 이 앱이 따로 확인하지는 못했어요.")
 
 
 # ================================================================ 메인

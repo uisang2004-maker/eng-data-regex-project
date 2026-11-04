@@ -240,3 +240,71 @@ def test_ko_underlines_multiple():
     plain = T.fix_korean(T.unprotect(raw))
     got = [(plain[a:b], k) for a, b, k in T.ko_underlines_from_xml(raw, plain)]
     assert got == [("주제 모델", "def"), ("텍스트를 분석한다", "method")]
+
+
+# ---------------------------------------------------------------- Claude Haiku 엔진(가짜 클라이언트, 네트워크 없음)
+
+class FakeClaude:
+    """messages.create를 흉내 낸다. <s> 안에 'KO:'를 붙여 돌려주고, 받은 요청을 기록한다."""
+
+    def __init__(self, stop_reason="end_turn", error=None):
+        from types import SimpleNamespace as NS
+        self.calls = []
+        outer = self
+
+        class Messages:
+            def create(self, **kw):
+                outer.calls.append(kw)
+                if error:
+                    raise error
+                text = re.sub(r"<s>", "<s>KO:", kw["messages"][0]["content"])
+                return NS(stop_reason=stop_reason, content=[NS(type="text", text=text)])
+
+        self.messages = Messages()
+
+
+def claude_caller(client):
+    return lambda texts, key, split: T.call_claude(texts, key, split, client=client)
+
+
+def test_claude_request_shape_and_aligned_result():
+    fc = FakeClaude()
+    r = T.translate(["We propose X.", "It works."], api_key="k", caller=claude_caller(fc), engine="claude")
+    assert r.mode == "aligned" and r.ko == ["KO:We propose X.", "KO:It works."]
+    kw = fc.calls[0]
+    assert kw["model"] == "claude-haiku-5-5" and kw["thinking"] == {"type": "disabled"}
+    assert "temperature" not in kw and kw["messages"][0]["content"].count("<s>") == 2
+
+
+def test_claude_per_sentence_fallback_unwraps_tags():
+    out = T.call_claude(["One.", "Two."], "k", "0", client=FakeClaude())
+    assert out == ["KO:One.", "KO:Two."]
+
+
+def test_claude_refusal_and_cutoff_become_errors():
+    for reason in ("refusal", "max_tokens"):
+        r = T.translate(["A sentence."], api_key="k", caller=claude_caller(FakeClaude(stop_reason=reason)),
+                        engine="claude", use_file_cache=False)
+        assert r.ko is None and r.error
+
+
+def test_claude_api_errors_mapped():
+    import anthropic
+    import httpx2 as httpx
+
+    resp = httpx.Response(429, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    err = anthropic.RateLimitError("rate", response=resp, body=None)
+    r = T.translate(["A sentence."], api_key="k", caller=claude_caller(FakeClaude(error=err)),
+                    engine="claude", use_file_cache=False)
+    assert r.error == T.ERROR_MESSAGES[429]
+
+
+def test_engine_cache_keys_separate_and_deepl_key_unchanged():
+    x = ["<s>a</s>"]
+    assert T.cache_key(x, True) == T.cache_key(x, True, "deepl")
+    assert T.cache_key(x, True, "claude") != T.cache_key(x, True)
+
+
+def test_pick_engine_prefers_claude():
+    assert T.pick_engine("c", "d")[0] == "claude"
+    assert T.pick_engine(None, "d")[:2] == ("deepl", "d")
