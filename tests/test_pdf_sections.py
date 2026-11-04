@@ -205,3 +205,45 @@ def test_plain_len_ignores_tags_so_chunks_fit_limit():
     sents = [f"Sentence {i} has some words in it." for i in range(200)]
     for a, b in T.chunk_ranges(sents, 4000):
         assert T.plain_len(" ".join(f"<s>{s}</s>" for s in sents[a:b])) <= 4000
+
+
+# ---------------------------------------------------------------- 표 찾기
+
+from src import tables as TB
+
+
+def make_pdf_with_rules(items, rules, size=10):
+    """make_pdf에 가로선(re 연산자로 그린 얇은 사각형)을 더한 PDF."""
+    body = "".join(f"BT /F1 {size} Tf {x} {y} Td ({t}) Tj ET\n" for x, y, t in items)
+    body += "".join(f"{x0} {y} {x1 - x0} 0.5 re f\n" for x0, x1, y in rules)
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [5 0 R] /Count 1 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            f"<< /Length {len(body)} >>\nstream\n{body}endstream",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 3 0 R >> >> >>"]
+    out, offs = "%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out.encode("latin-1")))
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    xref = len(out.encode("latin-1"))
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n" + "".join(f"{o:010d} 00000 n \n" for o in offs)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    return out.encode("latin-1")
+
+
+def test_find_table_by_caption_and_rules():
+    items = [(72, 700, "Table 1: Accuracy of two models on a test set."),
+             (80, 670, "Model"), (300, 670, "Accuracy"),
+             (80, 650, "Base"), (300, 650, "71.2"),
+             (80, 635, "Ours"), (300, 635, "74.9"),
+             (72, 560, "Table 2. A table without any rules."),
+             (72, 400, "Body text says Table 1 shows our gains over the base model in this short paper.")]
+    rules = [(72, 400, 684), (72, 400, 662), (72, 400, 628)]
+    ts = TB.find_tables(make_pdf_with_rules(items, rules))
+    assert [t.num for t in ts] == [1, 2]
+    assert ts[0].caption.startswith("Table 1: Accuracy") and not ts[0].whole_page and ts[0].png[:4] == b"\x89PNG"
+    assert ts[1].whole_page                       # 선이 없으면 쪽 전체 이미지로
+
+
+def test_table_mentions():
+    assert TB.mentioned("As Table 3 shows, and Tables 2 and 4, see Tab. 5; also Table 3 again.") == [3, 2, 4, 5]
+    assert TB.mentioned("A stable table-like result.") == []

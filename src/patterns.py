@@ -485,3 +485,17 @@ SEC_CONCLUSION_TITLE = re.compile(r"\b(?:Conclusions?|Concluding|Discussion|Limi
 
 SEC_ACK_TITLE = re.compile(r"^Acknowledg", re.I)
 """감사의 글: 독해에 필요 없어 쪽 나누기에서 뺀다."""
+
+# ====================================================================== 논문 PDF 표 (tables)
+
+TABLE_CAPTION = re.compile(r"^(?:Table|TABLE)\s+(?P<num>\d{1,2})\s*[:.|]\s*\S")
+"""표 설명(캡션) 첫 줄: ``Table 3: SQuAD 2.0 results.``, ``Table 1. Architectures ...``, ``TABLE 2: ...``."""
+
+FIGURE_CAPTION = re.compile(r"^(?:Figure|Fig\.|FIGURE)\s*\d{1,2}\s*[:.|]")
+"""그림 설명 첫 줄. 표 영역을 넓혀 가다가 이것을 만나면 멈춘다."""
+
+TABLE_MENTION = re.compile(r"\b(?:Tables?|Tab\.)\s+\d{1,2}(?:\s*(?:,|and|&|–|-)\s*\d{1,2})*\b")
+"""본문에서 표를 가리키는 말: ``Table 3``, ``Tables 2 and 4``, ``Tab. 5``. 화면에서 그 표를 바로 보여 주는 데 쓴다."""
+
+DEHYPHEN_SPACE = re.compile(r"(?<=[a-z])- (?=[a-z])")
+"""캡션처럼 줄을 공백으로 이은 글에서 줄 끝 하이픈 지우기: ``Human per- formance`` → ``Human performance``."""

@@ -19,6 +19,7 @@ from src.explain import MAX_TERMS, explain_terms
 from src.extract import ROLE_ORDER, analyze
 from src.pdf_text import PdfError, extract as extract_pdf
 from src.sections import PAGES as PAPER_PAGES, paper_pages, split_paper
+from src.tables import find_tables, mentioned as mentioned_tables
 
 PAGES = ("논문 읽기", "규칙 탐색", "검증 결과")
 MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
@@ -220,6 +221,9 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* 논문 표 */
+.pp-table-cap { font-size:13px; color:#2c4560; line-height:1.55; margin:10px 0 6px; }
+
 /* 읽기 모드: 문장마다 한영 */
 .pp-pair-ko { display:flex; gap:8px; align-items:baseline; margin-top:6px; padding:6px 10px; background:#f6f9fc;
   border-left:3px solid #9fbbd2; border-radius:6px; color:#34485f; }
@@ -387,6 +391,10 @@ def load_pdf(data: bytes, name: str) -> str | None:
     paper = split_paper(pdf.lines, pdf.title or name)
     if not paper.sections:
         return "PDF에서 본문을 찾지 못했어요."
+    try:
+        ss.paper_tables = find_tables(data)       # 표 캡션(정규식) + 가로선으로 자른 표 이미지
+    except Exception:                            # 표 찾기가 실패해도 본문 분석은 그대로 보여 준다
+        ss.paper_tables = []
     paper.notes = [f"PDF {pdf.read_pages}쪽을 읽었어요" + (f"(2단 편집 {pdf.two_column_pages}쪽은 왼쪽 단 → 오른쪽 단 순서로)"
                                                        if pdf.two_column_pages else "") + "."] + pdf.notes + paper.notes
     ss.paper = paper
@@ -633,6 +641,13 @@ def paper_overview(paper) -> None:
                     f'<thead><tr><th>절</th><th>문장</th><th>신호 문구로 찾은 핵심 문장</th><th>소제목</th></tr></thead>'
                     f'<tbody>{"".join(rows)}</tbody></table></div>', unsafe_allow_html=True)
 
+    tables = ss.get("paper_tables") or []
+    with st.expander(f"논문의 표 모아보기 · {len(tables)}개"):
+        if not tables:
+            st.caption("'Table 1:'처럼 시작하는 표 설명(캡션)을 찾지 못했어요.")
+        for t in tables:
+            table_card(t, "all")
+
     with st.expander("논문 전체 어려운 단어표"):
         whole = analyze("\n\n".join(s.text for s in paper.sections))
         entries = G.build(whole)
@@ -850,6 +865,40 @@ def current_translation(a):
     return res
 
 
+def table_card(t, prefix: str) -> None:
+    """표 하나: 번호·쪽·캡션, 잘라 낸 이미지, 칸이 깔끔하면 '표로 보기'(CSV)."""
+    where = "쪽 전체(표 영역을 찾지 못함)" if t.whole_page else "표 영역"
+    st.markdown(f'<div class="pp-table-cap"><b>Table {t.num}</b> <span class="pp-meta">· {t.page}쪽 · {where}</span><br>'
+                f'{esc(t.caption)}</div>', unsafe_allow_html=True)
+    width = int.from_bytes(t.png[16:20], "big")      # PNG 머리의 가로 픽셀. 좁은 표를 억지로 늘리지 않는다
+    st.image(t.png, width=min(width, 900))
+    if t.grid:
+        with st.expander(f"Table {t.num} 표로 보기(자동 인식, 원본 이미지와 비교해 주세요)"):
+            import pandas as pd
+            width = max(len(r) for r in t.grid)
+            rows = [r + [""] * (width - len(r)) for r in t.grid]
+            df = pd.DataFrame(rows[1:], columns=[c or f"열{i + 1}" for i, c in enumerate(rows[0])]) \
+                if len(set(rows[0])) == width else pd.DataFrame(rows)
+            st.dataframe(df, hide_index=True, use_container_width=True)
+            st.download_button("CSV로 내려받기", df.to_csv(index=False).encode("utf-8-sig"),
+                               file_name=f"table_{t.num}.csv", mime="text/csv", key=f"tcsv_{prefix}_{t.num}")
+
+
+def mentioned_table_panel(a) -> None:
+    """지금 읽는 글이 'Table 3'처럼 가리킨 표를 원문 바로 아래에서 펼쳐 볼 수 있게 한다(정규식 TABLE_MENTION)."""
+    ss = st.session_state
+    tables = {t.num: t for t in ss.get("paper_tables") or []} if ss.source["kind"] == "pdf" else {}
+    nums = [n for n in mentioned_tables(a.text) if n in tables]
+    if not nums:
+        return
+    st.markdown(f'<div class="pp-sub-title">이 글에서 언급한 표 · {", ".join(f"Table {n}" for n in nums)}</div>',
+                unsafe_allow_html=True)
+    for n in nums:
+        cap = tables[n].caption
+        with st.expander(f"{cap[:80]}{'…' if len(cap) > 80 else ''} · {tables[n].page}쪽"):
+            table_card(tables[n], "ref")
+
+
 def interleaved_panel(a) -> None:
     """문장마다 한영: 영어 문장 바로 아래에 그 문장의 한국어 번역."""
     ss = st.session_state
@@ -1020,6 +1069,7 @@ def reading_page() -> None:
         st.markdown(en_panel, unsafe_allow_html=True)
     else:
         translation_panel(a)
+    mentioned_table_panel(a)
 
     st.markdown(sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),
                 unsafe_allow_html=True)

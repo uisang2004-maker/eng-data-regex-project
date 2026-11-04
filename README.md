@@ -92,6 +92,7 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 | 논문 PDF 절 나누기 | `1 Introduction`·`3.2 Pre-training BERT`·`II. RELATED WORK`·`ABSTRACT` 같은 절 제목 줄을 찾음. 번호가 1, 2, 3… 차례로 이어질 때만 받아들이고, 기능어가 많은 줄(번호 각주)·숫자 줄(표)은 제외. `References`에서 멈춤. 각주·그림/표 설명·이메일 줄은 첫머리 정규식으로 뺌 |
 | PDF 앞머리·각주 거르기 | 이메일(`{a,b}@lab.org` 묶음 포함), 소속(`… is with University …`), `E-mail:`·교신저자·투고일·`Index Terms—`·저작권·DOI·학회 이름 줄이 든 짧은 문단을 빼고, 긴 문단 속 이메일은 지움. 본문보다 작은 글자 줄(각주·캡션·표)도 뺌(초록 전체가 작은 글자인 형식은 예외) |
 | 초록·본문·결론 쪽 | `Abstract`(같은 줄에서 시작하는 `Abstract—…` 포함)는 초록, `Conclusion`·`Discussion`·`Limitations`·`Future Work`는 결론, 나머지 번호 절은 본문. 작은 대문자 제목(`1 I NTRODUCTION`, `R EFERENCES`)도 인식 |
+| 논문 표 | `Table 3:`·`Table 1.`로 시작하는 캡션 줄(`TABLE_CAPTION`)로 표를 찾고, 캡션 옆 가로선 묶음으로 표 영역을 정해 **이미지로 잘라** 보여 줌(행·열 자동 인식은 불안정해 칸이 깔끔한 표만 '표로 보기'·CSV). 본문의 `Table 3`·`Tables 2 and 4`(`TABLE_MENTION`)를 찾아 그 글이 언급한 표를 원문 바로 아래에서 펼쳐 봄 |
 | PDF 글자 정리 | 줄 끝 하이픈은 붙인 단어가 영어 빈도표에 없고 뒤 조각이 단어이면 남김(`fine-tuned`), 작은 대문자 조각 붙이기(`B idirectional` → `Bidirectional`) |
 | 단어표 AI 풀이(선택) | **어떤 단어를 넣을지는 정규식·빈도표가 정하고**, 'AI로 뜻 풀이 받기'를 누르면 그 단어들의 이 논문에서의 뜻만 Claude Haiku가 한국어 한 줄로 씀(JSON 스키마로 받아 보낸 단어만 반영, '참고용' 표시) |
 | 흐름도·어려운 단어표 | 문장 역할(배경→문제→방법→결과→한계)을 이은 흐름도, 일상 영어에서 드문 단어(전문용어)·약어·모델 이름을 난이도와 함께 모은 단어표(CSV 내려받기) |
@@ -101,7 +102,7 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 | 경로 | 용도 |
 |---|---|
 | `app.py` | Streamlit 화면 |
-| `src/` | `patterns`(규칙) · `clean`(정리·분리) · `extract`(약어·뼈대·표시) · `collect`(arXiv) · `pdf_text`(PDF 글자·2단 순서) · `sections`(절 나누기) · `glossary`(단어표) · `explain`(단어 AI 풀이) · `translate`(Claude Haiku·DeepL) · `usage`(사용 제한) · `analyze`(평가) |
+| `src/` | `patterns`(규칙) · `clean`(정리·분리) · `extract`(약어·뼈대·표시) · `collect`(arXiv) · `pdf_text`(PDF 글자·2단 순서) · `sections`(절 나누기) · `tables`(표 찾기) · `glossary`(단어표) · `explain`(단어 AI 풀이) · `translate`(Claude Haiku·DeepL) · `usage`(사용 제한) · `analyze`(평가) |
 | `tests/` | pytest(규칙 양성·음성·경계 사례, 번역 안전장치, 화면 상태) |
 | `data/processed/` | 초록 샘플(CC0), arXiv·번역 캐시 |
 | `docs/` | 계획서, 진행 기록, 체크리스트, 디자인 인계 자료(`design/paperpath-v03`), 스크린샷 |
