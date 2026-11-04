@@ -120,7 +120,41 @@ def find_acronyms(text: str) -> dict[str, str | None]:
 
 # ---------------------------------------------------------------- 단어 단위 표시 (P0-3, P0-4)
 
-PRIORITY = {"reference": 0, "abbr": 1, "abbr-missing": 1, "number": 2, "definition": 2, "confident": 3, "hedge": 4}
+PRIORITY = {"reference": 0, "abbr": 1, "abbr-missing": 1, "number": 2, "definition": 2, "confident": 3, "hedge": 4, "term": 5}
+
+
+def _norm_term(w: str) -> str:
+    w = w.lower()
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith(("ss", "us", "is")):
+        return w
+    return w[:-1] if w.endswith("s") and len(w) > 3 else w
+
+
+def frequent_terms(text: str) -> list[tuple[str, int, list[tuple[int, int]]]]:
+    """3번 이상 나오는 용어와 등장 위치. 두 단어 용어를 먼저, 남은 한 단어를 그다음에 찾는다."""
+    toks = [(m.start(), m.end(), _norm_term(m.group(0))) for m in P.TERM_WORD.finditer(text)]
+    content = [t for t in toks if t[2] not in P.TERM_STOPWORDS]
+    pairs: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for (a1, b1, w1), (a2, b2, w2) in zip(content, content[1:]):
+        if re.fullmatch(r"[ \t]+", text[b1:a2]) and w1 not in P.TERM_GENERIC:
+            pairs.setdefault((w1, w2), []).append((a1, b2))
+    out, taken = [], []
+    for (w1, w2), spans in sorted(pairs.items(), key=lambda kv: -len(kv[1])):
+        free = [sp for sp in spans if all(sp[1] <= a or sp[0] >= b for a, b in taken)]
+        if len(free) >= P.TERM_MIN_COUNT:
+            out.append((f"{w1} {w2}", len(free), free))
+            taken += free
+    singles: dict[str, list[tuple[int, int]]] = {}
+    for a, b, w in content:
+        if w in P.TERM_GENERIC or w.endswith("ed") or any(x <= a < y for x, y in taken):
+            continue
+        singles.setdefault(w, []).append((a, b))
+    for w, spans in singles.items():
+        if len(spans) >= P.TERM_MIN_COUNT:
+            out.append((w, len(spans), spans))
+    return out
 
 
 def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> list[Mark]:
@@ -144,6 +178,10 @@ def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> lis
     if "DEFINITION" in active:
         for m in P.DEFINITION_CUE.finditer(text):
             marks.append(Mark(m.start(), m.end(), "definition", "DEFINITION", f"용어 설명·예시 · {P.DEFINITION_RULE.reason}"))
+    if "TERM" in active:
+        for term, n, spans in frequent_terms(text):
+            for x, y in spans:
+                marks.append(Mark(x, y, "term", "TERM", f"반복 용어 · '{term}'이(가) 이 글에 {n}번 나와요"))
     if "HEDGE" in active:
         excluded = [(m.start(), m.end()) for m in P.HEDGE_EXCLUDE.finditer(text)] if "HEDGE_EXCLUDE" in active else []
         for m in P.HEDGE.finditer(text):
@@ -360,5 +398,6 @@ def analyze(raw: str, active_rules: frozenset | set | None = None) -> Analysis:
         "reference": sum(m.category == "reference" for m in marks),
         "definition": len(explanations),
         "number": sum(m.category == "number" for m in marks),
+        "term": len({m.tip for m in marks if m.category == "term"}),
     }
     return Analysis(text, cleaned.removed_lines, sentences, acronyms, marks, skeleton, limits, counts, active, explanations)

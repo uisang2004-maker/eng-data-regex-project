@@ -100,7 +100,7 @@ def test_rule_off_removes_marks():
 
 
 def test_demo_counts():
-    assert analyze(DEMO).counts == {"abbr": 1, "hedge": 2, "confident": 2, "reference": 1, "definition": 0, "number": 1}
+    assert analyze(DEMO).counts == {"abbr": 1, "hedge": 2, "confident": 2, "reference": 1, "definition": 0, "number": 1, "term": 0}
 
 
 # ---------------------------------------------------------------- 3줄 뼈대 (P0-2)
@@ -249,3 +249,34 @@ def test_definition_and_number_marks():
 def test_definition_toggle_removes_explanations():
     a = analyze("Tasks such as parsing are hard.", P.DEFAULT_ACTIVE_RULES - {"DEFINITION"})
     assert a.explanations == [] and a.counts["definition"] == 0
+
+
+# ---------------------------------------------------------------- 반복 용어
+
+def terms(text):
+    from src.extract import frequent_terms
+    return {w: n for w, n, _ in frequent_terms(analyze(text).text)}
+
+
+def test_frequent_two_word_term_and_single_word():
+    t = ("Text classification is hard. Existing text classification models ignore the label hierarchy. "
+         "We add label information. Our text classification uses each label.")
+    assert terms(t) == {"text classification": 3, "label": 3}
+
+
+def test_function_words_and_generic_words_are_excluded():
+    t = "The model and the data. The model and the data. The model and the data."
+    assert terms(t) == {}
+
+
+def test_plural_counts_as_same_term_and_ed_words_excluded():
+    t = "One lexicon helps. Two lexicons help. Lexicons are weighted, weighted and weighted."
+    assert terms(t) == {"lexicon": 3}
+
+
+def test_term_toggle_and_marks():
+    t = "A parser parses. The parser fails. Every parser learns."
+    a = analyze(t)
+    assert [a.text[m.start:m.end] for m in a.marks if m.category == "term"] == ["parser", "parser", "parser"]
+    assert a.counts["term"] == 1
+    assert analyze(t, P.DEFAULT_ACTIVE_RULES - {"TERM"}).counts["term"] == 0

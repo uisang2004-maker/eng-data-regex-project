@@ -213,7 +213,42 @@ NUMBER_RULE = Rule(
     toggleable=True,
 )
 
-TOKEN_RULES = (ABBR_RULE, HEDGE_RULE, HEDGE_EXCLUDE_RULE, CONFIDENT_RULE, REFERENCE_RULE, DEFINITION_RULE, NUMBER_RULE)
+TERM_WORD = re.compile(r"[A-Za-z][A-Za-z-]{2,}")
+"""반복 용어 후보 단어(3글자 이상)."""
+
+TERM_MIN_COUNT = 3
+"""이 글 안에서 3번 이상 나오면 반복 용어로 본다."""
+
+TERM_STOPWORDS = frozenset("""
+a an the and or but nor so yet for of in on at to from by with without within into onto over under about across after before
+between through during against among is are was were be been being am do does did done have has had having can could may might
+must shall should will would this that these those it its they them their there here which who whom whose what when where why how
+than then also as such we our us you your he she his her not no only more most less least very much many some any each every both
+either neither other another own same
+""".split())
+"""관사·전치사·접속사·대명사·조동사 등 기능어. 반복 용어에서 뺀다."""
+
+TERM_GENERIC = frozenset("""
+paper work study result approach method model task data performance system problem use used using propose proposed show shown
+based new existing different two three four first one second various several large small high low however further well recent
+recently moreover thus therefore while whether number amount main level set way time case part type kind order term able given
+provide achieve improve effective effect significant important specific general previous current
+""".split())
+"""어느 논문에나 자주 나오는 일반어. 한 단어로는 반복 용어로 보지 않는다(두 단어 용어의 뒷부분으로는 허용: 'language model')."""
+
+TERM_RULE = Rule(
+    "TERM", "term", "반복 용어",
+    TERM_WORD,
+    "이 글 안에서 3번 이상 나오는 용어. 두 단어 용어('language model')를 먼저 찾고, 남는 한 단어를 찾는다. "
+    "기능어·일반어·-ed로 끝나는 한 단어(형용사·과거분사)는 뺀다. 복수형은 단수와 같은 용어로 센다.",
+    reason="이 글에서 계속 나오는 핵심 용어예요. 뜻을 먼저 잡아 두면 나머지가 쉬워져요",
+    examples=("language model", "sentence", "lexicon"),
+    misses=("2번 이하로 나오는 용어", "철자가 바뀐 변형(-ing 형 등)"),
+    toggleable=True,
+)
+
+TOKEN_RULES = (ABBR_RULE, HEDGE_RULE, HEDGE_EXCLUDE_RULE, CONFIDENT_RULE, REFERENCE_RULE, DEFINITION_RULE, NUMBER_RULE,
+               TERM_RULE)
 
 # ====================================================================== 3줄 뼈대 (P0-2)
 

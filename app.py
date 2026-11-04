@@ -36,9 +36,9 @@ KIND_META = {
 }
 BASIS_TEXT = {"signal": "신호 문구로 찾음", "position": "위치로 추정", "none": "찾지 못함"}
 MARK_LABEL = {"abbr": "약어", "abbr-missing": "약어(정의 없음)", "hedge": "추측·가능성", "confident": "확신", "reference": "참조",
-              "definition": "용어 설명·예시", "number": "수치 근거"}
+              "definition": "용어 설명·예시", "number": "수치 근거", "term": "반복 용어"}
 CAT_RULE = {"abbr": "ABBR", "abbr-missing": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE",
-            "definition": "DEFINITION", "number": "NUMBER"}
+            "definition": "DEFINITION", "number": "NUMBER", "term": "TERM"}
 UL_TITLE = {"problem": "핵심 내용(밑줄) · 무엇이 어려운가", "method": "핵심 내용(밑줄) · 무엇을 만들었나",
             "result": "핵심 내용(밑줄) · 무엇을 발견했나", "def": "용어 설명(점선 밑줄)"}
 
@@ -143,8 +143,8 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-sk-ko { margin-top:8px; padding-top:8px; border-top:1px dashed #e3e9f0; font-size:13.5px; color:#4a5e73; line-height:1.65; }
 .pp-u { text-decoration-line: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; text-decoration-color:#6c9dbb; }
 .pp-u.method { text-decoration-color:#3a9c92; } .pp-u.result { text-decoration-color:#8b79b5; }
-.pp-u.def { text-decoration-style: dotted; text-decoration-thickness: 2px; text-decoration-color:#c45a83; }
-.pp-u .pp-u.def { text-decoration: none; color:#a2385f; }   /* 핵심 내용 밑줄 안의 용어 설명은 글자색으로만 */
+.pp-u.def { text-decoration-style: dotted; text-decoration-thickness: 2px; text-decoration-color:#286b9c; }
+.pp-u .pp-u.def { text-decoration: none; color:#205f90; }   /* 핵심 내용 밑줄 안의 용어 설명은 글자색으로만 */
 .pp-u .pp-m, .pp-u [class^="pp-sig-"] { background: transparent !important; border-bottom: 0 !important; padding: 0; }
 .pp-reason { display:flex; align-items:flex-start; gap:6px; margin-top:10px; color:#5c7084; font-size:12px; line-height:1.5; }
 .pp-limit { color:#60758a; font-size:12px; margin-top:2px; }
@@ -154,7 +154,6 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-chip { height:28px; padding:0 10px; border-radius:7px; display:inline-flex; align-items:center; font-size:12px; font-weight:750; }
 .pp-chip.blue { color:#25618b; background:var(--blue-soft); } .pp-chip.amber { color:#986314; background:var(--amber-soft); }
 .pp-chip.teal { color:#1f7b73; background:var(--teal-soft); } .pp-chip.violet { color:#73539d; background:var(--violet-soft); }
-.pp-chip.rose { color:#a2385f; background:#fcedf3; } .pp-chip.indigo { color:#3c4ea0; background:#eef0fb; }
 
 /* 원문·번역 */
 .pp-reader-head { padding:12px 16px; border-bottom:1px solid #edf0f4; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -175,8 +174,10 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-m.hedge { color:#956314; background:#fff4dd; border-bottom:1px solid #d7ac57; }
 .pp-m.confident { color:#1c756d; background:#e8f5f1; }
 .pp-m.reference { color:#73539d; background:#f0ebf8; }
-.pp-m.definition { color:#a2385f; background:#fcedf3; border-bottom:1px solid #e3a3bc; }
-.pp-m.number { color:#3c4ea0; background:#eef0fb; }
+/* 색은 늘리지 않는다: 용어 설명은 약어와 같은 파랑, 수치 근거는 확신과 같은 청록, 반복 용어는 파랑 얇은 밑줄 */
+.pp-m.definition { color:#205f90; background:#eaf3fb; border-bottom:1px solid #7ca9ca; }
+.pp-m.number { color:#1c756d; background:#e8f5f1; }
+.pp-m.term { color:inherit; font-weight:650; background:transparent; padding:0; border-bottom:1.5px solid #7ca9ca; border-radius:0; }
 .pp-m:hover::after, .pp-m:focus::after { content: attr(data-tip); position:absolute; left:0; top:calc(100% + 6px); z-index:20;
   background:#17293f; color:#fff; font-size:12px; font-weight:500; line-height:1.45; padding:7px 9px; border-radius:7px;
   width:max-content; max-width:300px; white-space:normal; box-shadow:0 6px 16px rgba(0,0,0,.18); }
@@ -594,8 +595,9 @@ def reading_page() -> None:
                 f'<span class="pp-chip amber">추측·가능성 {c["hedge"]}</span>'
                 f'<span class="pp-chip teal">확신 {c["confident"]}</span>'
                 f'<span class="pp-chip violet">참조 {c["reference"]}</span>'
-                f'<span class="pp-chip rose">용어 설명 {c["definition"]}</span>'
-                f'<span class="pp-chip indigo">수치 {c["number"]}</span></div>', unsafe_allow_html=True)
+                f'<span class="pp-chip blue">용어 설명 {c["definition"]}</span>'
+                f'<span class="pp-chip blue">반복 용어 {c["term"]}</span>'
+                f'<span class="pp-chip teal">수치 {c["number"]}</span></div>', unsafe_allow_html=True)
     with t3:
         st.toggle("읽기 전용 단계 보기", key="show_steps")
     if ss.show_steps:
