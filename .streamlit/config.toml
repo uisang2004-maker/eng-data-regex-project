@@ -1,12 +1,13 @@
 [theme]
 base = "light"
-primaryColor = "#183b60"
+primaryColor = "#152c49"
 backgroundColor = "#f6f8fc"
 secondaryBackgroundColor = "#eef3f8"
 textColor = "#14263e"
 
 [server]
 maxUploadSize = 20
+enableStaticServing = true   # static/hero.jpg(첫 화면 배경)
 
 [browser]
 gatherUsageStats = false

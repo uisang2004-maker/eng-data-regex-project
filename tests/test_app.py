@@ -31,7 +31,8 @@ def md_text(at):
 def test_start_screen_hides_results_until_input(blank):
     text = "\n".join(m.value for m in blank.markdown if not m.value.lstrip().startswith("<style"))
     assert "끌어다 놓으세요" in text and "논문 넣기" in text
-    assert 'class="pp-flow"' not in text and "pp-reader-title" not in text and "3줄 뼈대 ·" not in text
+    assert 'class="pp-flow"' not in text and "pp-reader-title" not in text and "먼저 읽을 3줄 뼈대" not in text
+    assert "AI-Powered Translation" in text and 'class="pp-hero"' in text        # 첫 화면 히어로
     assert blank.session_state["input_mode"] == "논문 PDF"
     assert not any(b.label == "번역하기" for b in blank.button)
 

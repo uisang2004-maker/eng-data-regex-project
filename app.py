@@ -75,7 +75,7 @@ CSS = """
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
 :root {
   --ink:#14263e; --muted:#52677f; --subtle:#66798b; --line:#e2e9f2; --surface:#ffffff; --canvas:#f6f8fc;
-  --navy:#183b60; --blue:#2b6f9f; --blue-soft:#edf5fc; --teal:#21877f; --teal-soft:#eaf7f4;
+  --navy:#152c49; --blue:#3979b5; --blue-soft:#eaf3fc; --teal:#21877f; --teal-soft:#eaf7f4;
   --amber:#9a681d; --amber-soft:#fff7e8; --violet:#7156a2; --violet-soft:#f3effa;
   --radius:14px; --shadow:0 4px 18px rgba(26,54,83,.045), 0 1px 2px rgba(25,49,77,.03);
 }
@@ -114,6 +114,29 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; background:#36a28d; }
 .pp-dot.err { background:#c2410c; }
 .pp-avatar { width:32px; height:32px; border-radius:50%; background:#edf2f7; display:grid; place-items:center; color:#60758b; font-size:11px; font-weight:750; }
+
+/* 첫 화면 히어로: 왼쪽 소개, 오른쪽은 배경 이미지(지구본·A↔文·논문) */
+.pp-hero { position:relative; overflow:hidden; border-radius:18px; margin:6px 0 4px; min-height:300px;
+  background:#eaf3fc url('app/static/hero.jpg') right center / cover no-repeat;
+  border:1px solid #dbe7f4; box-shadow:0 10px 30px rgba(21,44,73,.08); }
+.pp-hero::before { content:""; position:absolute; inset:0;
+  background:linear-gradient(90deg, rgba(255,255,255,.96) 0%, rgba(255,255,255,.88) 34%, rgba(234,243,252,.25) 62%, rgba(234,243,252,0) 100%); }
+.pp-hero-text { position:relative; z-index:1; max-width:560px; padding:44px 40px 40px; }
+.pp-hero .pp-eyebrow { color:#3979b5; }
+.pp-hero-h1 { margin:0; font-size:38px; line-height:1.22; letter-spacing:-1.4px; font-weight:800; color:#152c49;
+  word-break:keep-all; }
+.pp-hero-desc { font-size:16px; color:#3e5672; margin-top:14px; line-height:1.6; }
+.pp-hero-badges { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
+.pp-hero-badge { display:inline-flex; align-items:center; gap:6px; padding:7px 13px; border-radius:999px; font-size:12.5px;
+  font-weight:750; color:#fff; background:linear-gradient(135deg,#3979b5,#152c49); box-shadow:0 4px 12px rgba(57,121,181,.28); }
+.pp-hero-badge.soft { color:#152c49; background:rgba(255,255,255,.85); border:1px solid #cfe0f1; box-shadow:none; }
+@media (max-width: 900px) {
+  .pp-hero { min-height:0; background-position:78% center; }
+  .pp-hero::before { background:linear-gradient(180deg, rgba(255,255,255,.95) 0%, rgba(255,255,255,.86) 100%); }
+  .pp-hero-text { padding:26px 20px 24px; }
+  .pp-hero-h1 { font-size:25px; letter-spacing:-.8px; }
+  .pp-hero-desc { font-size:14.5px; word-break:keep-all; }
+}
 
 /* 소개 */
 .pp-intro { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-top:6px; }
@@ -278,8 +301,9 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
   padding:2px 7px; margin-right:8px; }
 
 /* PDF 끌어다 놓기 칸 */
-.st-key-pdf_drop { border:2px dashed #8fb2cc; border-radius:14px; background:#f6fafd; padding:14px 16px 6px; }
-.pp-drop-title { font-size:16px; font-weight:780; color:#183b60; text-align:center; }
+.st-key-pdf_drop { border:2px dashed #9cc0e3; border-radius:14px; background:#eaf3fc; padding:16px 18px 8px; }
+.pp-drop-kicker { font-size:12px; font-weight:800; color:#3979b5; text-align:center; letter-spacing:.4px; }
+.pp-drop-title { font-size:18px; font-weight:800; color:#152c49; text-align:center; margin-top:2px; }
 .pp-drop-hint { font-size:12.5px; color:#5c7084; text-align:center; margin:2px 0 8px; }
 .st-key-pdf_drop [data-testid="stFileUploaderDropzone"] { min-height:120px; background:#fff;
   border:1px solid #d6e2ec; justify-content:center; }
@@ -891,8 +915,9 @@ def input_panel() -> None:
         clicked = False
         if mode == M_PDF:
             with st.container(key="pdf_drop"):
-                st.markdown('<div class="pp-drop-title">논문 PDF를 이 칸에 끌어다 놓으세요</div>'
-                            f'<div class="pp-drop-hint">또는 아래 칸을 눌러 파일을 고르세요 · 놓으면 바로 절별로 나눠 분석해요 · '
+                st.markdown('<div class="pp-drop-kicker">논문 번역을 시작해 보세요</div>'
+                            '<div class="pp-drop-title">PDF 파일을 여기에 끌어다 놓으세요</div>'
+                            f'<div class="pp-drop-hint">PDF 업로드 · arXiv ID · 텍스트 입력 · 놓으면 바로 절별로 나눠 분석해요 · '
                             f'{MAX_PDF_MB}MB 이하, 글자를 선택할 수 있는 PDF</div>', unsafe_allow_html=True)
                 st.file_uploader("논문 PDF", type=["pdf"], key="pdf_file", label_visibility="collapsed",
                                  on_change=on_pdf_drop,
@@ -1287,6 +1312,16 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False) -> None:
                    f"오늘 사이트 전체 {usage.used_today():,}/{lim.daily:,}자 · 긴 글은 {lim.per_request:,}자씩 나눠 번역")
 
 
+def hero() -> None:
+    """첫 화면 히어로: 왼쪽 소개 문구, 오른쪽은 배경 이미지(static/hero.jpg, 이의상 님이 만든 이미지)."""
+    st.markdown('<div class="pp-hero"><div class="pp-hero-text"><div class="pp-eyebrow">ACADEMIC READING WORKSPACE</div>'
+                '<h1 class="pp-hero-h1">논문을 읽는 길을<br>더 쉽게 만들어 드려요.</h1>'
+                '<div class="pp-hero-desc">영어 논문을 한국어로 이해하고, 핵심 내용을 빠르게 파악하세요.</div>'
+                '<div class="pp-hero-badges"><span class="pp-hero-badge">AI-Powered Translation</span>'
+                '<span class="pp-hero-badge soft">3줄 뼈대 · 형광펜 · 어려운 단어표</span></div>'
+                '</div></div>', unsafe_allow_html=True)
+
+
 def empty_guide() -> None:
     """자료를 넣기 전 화면: 결과 창들은 숨기고 쓰는 순서만 보여 준다."""
     steps = [("1", "논문 넣기", "PDF를 위 칸에 끌어다 놓거나, arXiv ID·텍스트를 넣어요."),
@@ -1301,10 +1336,12 @@ def empty_guide() -> None:
 
 def reading_page() -> None:
     ss = st.session_state
-    st.markdown(f'<div class="pp-intro"><div><div class="pp-eyebrow">ACADEMIC READING WORKSPACE</div>'
-                f'<h1 class="pp-h1">논문을 읽는 길을 먼저 보여드려요.</h1>'
-                f'<div class="pp-desc">원문은 그대로, 핵심 문장과 읽기 신호는 한눈에.</div></div>'
-                f'<div class="pp-flag">{ICON["info"]}{esc(source_flag())}</div></div>', unsafe_allow_html=True)
+    if ss.show_input or not ss.input_text:
+        hero()                             # 첫 화면·다시 넣기: 큰 히어로
+    else:                                  # 자료를 넣은 뒤: 본문이 밀리지 않게 한 줄 제목만
+        st.markdown(f'<div class="pp-intro"><div><div class="pp-eyebrow">ACADEMIC READING WORKSPACE</div>'
+                    f'<h1 class="pp-h1">논문을 읽는 길을 더 쉽게 만들어 드려요.</h1></div>'
+                    f'<div class="pp-flag">{ICON["info"]}{esc(source_flag())}</div></div>', unsafe_allow_html=True)
     if ss.show_input or not ss.input_text:
         input_panel()
         if not ss.input_text:
