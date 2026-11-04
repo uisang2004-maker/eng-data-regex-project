@@ -1155,8 +1155,9 @@ def float_box(key, t, cls: str, max_w: int, max_h: int | None = None, fixed: boo
             f'style="aspect-ratio:{ratio}; width:{f"{min(w, max_w)}px" if fixed else f"min(100%, {min(w, max_w)}px)"}"></span>')
 
 
-def float_cards(i: int, ctx) -> str:
-    """i번째 문장이 처음 언급한 표·그림 카드: 작은 미리보기, 누르면 원래 크기."""
+def float_cards(i: int, ctx, ko: bool = False) -> str:
+    """i번째 문장이 처음 언급한 표·그림 카드: 작은 미리보기, 누르면 원래 크기.
+    ko면 한국어 번역 쪽 카드(이름을 '표 2'·'그림 1'로, 캡션은 원문 그대로)."""
     floats, first = ctx[0], ctx[1]
     out = []
     for key, idx in first.items():
@@ -1164,9 +1165,10 @@ def float_cards(i: int, ctx) -> str:
             continue
         t = floats[key]
         icon = "📊" if t.kind == "table" else "🖼️"
+        label = f"{'표' if t.kind == 'table' else '그림'} {t.num}" if ko else t.label
         where = " · 쪽 전체(영역을 찾지 못함)" if t.whole_page else ""
         cap = t.caption if len(t.caption) <= 160 else t.caption[:159] + "…"
-        out.append(f'<div class="pp-float"><details><summary><div class="pp-float-head">{icon} <b>{esc(t.label)}</b>'
+        out.append(f'<div class="pp-float"><details><summary><div class="pp-float-head">{icon} <b>{esc(label)}</b>'
                    f' <span class="pp-meta">· {t.page}쪽{where} · 누르면 크게</span></div>'
                    f'<div class="pp-float-cap">{esc(cap)}</div>{float_box(key, t, "pp-thumb", 640, 170)}</summary>'
                    f'{float_box(key, t, "pp-full", 900)}</details></div>')
@@ -1259,7 +1261,7 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False) -> None:
         if res.ko is not None and rows_on:
             ctx = cur_float_ctx(a)
             rows = [f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div><div>{ko_html(res, i, a, off)}</div></div>'
-                    + (float_cards(i, ctx) if floats_on else "") for i in range(len(res.ko))]
+                    + (float_cards(i, ctx, ko=True) if floats_on else "") for i in range(len(res.ko))]
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         elif res.ko is not None:
             st.markdown('<div class="pp-meta">번역 문장은 위 원문 문장마다 바로 아래에 붙었어요.</div>', unsafe_allow_html=True)
@@ -1365,7 +1367,7 @@ def reading_page() -> None:
         left, right = st.columns([1.13, 0.87])
         left.markdown(en_panel, unsafe_allow_html=True)
         with right:
-            translation_panel(a)
+            translation_panel(a, floats_on=True)       # 한국어 번역 쪽에도 같은 문장 아래에 표·그림
     elif mode == "pair":
         interleaved_panel(a)
         translation_panel(a, rows_on=False)

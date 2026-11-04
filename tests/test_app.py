@@ -275,3 +275,29 @@ def test_tables_and_figures_inline_after_first_mention(at):
     assert ".pp-flt-table-1{background-image:url(data:image/png;base64," in text
     assert text.count('class="pp-float"') == 2                       # 표 1·그림 2, 처음 언급한 문장 아래 한 번씩
     assert 'class="pp-pop"' in text and "Table 1: 문장 2 아래에 있어요" in text   # 3번째 문장의 두 번째 언급
+
+
+def test_tables_also_appear_in_korean_translation(at):
+    import hashlib
+
+    from src.extract import analyze
+    from src.tables import TableInfo
+    from src.translate import TranslationResult
+
+    text = "We describe the model. Results are in Table 1. The gains are large."
+    at.session_state["input_text"] = text
+    at.session_state["source"] = {"kind": "pdf", "title": "t", "section": "본문", "page": "본문"}
+    at.session_state["paper_tables"] = [TableInfo(1, "Table 1: Scores.", 3, b"\x89PNG", width=400, height=100)]
+    a = analyze(text)
+    tk = hashlib.sha256(a.text.encode("utf-8")).hexdigest()[:16]
+    ko = ["모델을 설명한다.", "결과는 표 1에 있다.", "향상이 크다."]
+    at.session_state["translations"] = {(tk, True): TranslationResult(ko=ko, mode="aligned", ko_marks=[[], [], []],
+                                                                      protected=[[], [], []])}
+    for mode, n in (("side", 2), ("ko", 1), ("en", 1), ("pair", 1)):
+        at.session_state["read_mode"] = mode
+        at.run()
+        out = "\n".join(m.value for m in at.markdown)
+        assert out.count('class="pp-float"') == n, mode          # 나란히 보기는 영어·한국어 쪽 둘 다
+    at.session_state["read_mode"] = "ko"
+    at.run()
+    assert "<b>표 1</b>" in "\n".join(m.value for m in at.markdown)
