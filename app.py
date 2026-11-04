@@ -210,6 +210,9 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-flow-note { color:#60758a; font-size:12px; margin-top:6px; }
 @media (max-width: 900px) { .pp-flow-arrow { display:none; } }
 
+.pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
+.pp-gloss td:nth-child(6) { min-width: 180px; }
+
 /* 단계 보기·규칙 */
 .pp-steps { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
 .pp-step { border:1px solid #e8eef4; border-radius:10px; padding:10px; background:#fbfdff; }
@@ -374,6 +377,10 @@ def translation_layers(raw_text: str):
     uls = card_underlines(full)
     marks = [[(m.start - s.start, m.end - s.start, m.category) for m in full.marks if s.start <= m.start and m.end <= s.end]
              for s in full.sentences]
+    jargon = G.jargon_marks(full)   # 단어표의 한국어 대응어를 얻으려는 태그(화면에는 그리지 않음)
+    for s, row in zip(full.sentences, marks):
+        row += [(x - s.start, y - s.start, c) for x, y, c in jargon if s.start <= x and y <= s.end
+                and all(y - s.start <= a or x - s.start >= b for a, b, _ in row)]
     return marks, [[w[:3] for w in uls.get(s.idx, [])] for s in full.sentences]
 
 
@@ -446,13 +453,14 @@ def flow_map(a, tr=None) -> str:
 
 def glossary_table(rows) -> str:
     if not rows:
-        return '<div class="pp-meta">이 글에서 정리할 용어를 찾지 못했어요.</div>'
+        return '<div class="pp-meta">이 글에서 어려운 단어(전문용어)를 찾지 못했어요.</div>'
     body = "".join(
         f"<tr><td><b>{esc(e.term)}</b></td><td>{esc(', '.join(G.KIND_LABEL[k] for k in e.kinds))}</td>"
+        f"<td>{esc(e.level) or '-'}</td>"
         f"<td>{e.count}</td><td>{('문장 ' + str(e.first_sentence)) if e.first_sentence else '-'}</td>"
         f"<td>{esc(e.explanation) or '-'}</td><td>{esc(e.korean) or '-'}</td></tr>" for e in rows)
-    return (f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table"><thead><tr>'
-            f'<th>용어</th><th>종류</th><th>횟수</th><th>처음 나온 곳</th><th>풀네임·설명(원문)</th><th>한국어</th>'
+    return (f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-gloss"><thead><tr>'
+            f'<th>용어</th><th>종류</th><th>난이도</th><th>횟수</th><th>처음 나온 곳</th><th>풀네임·설명(원문)</th><th>한국어</th>'
             f'</tr></thead><tbody>{body}</tbody></table></div>')
 
 
@@ -716,11 +724,12 @@ def reading_page() -> None:
     st.markdown(flow_map(a, tr), unsafe_allow_html=True)
     rows = G.build(a, G.korean_marks(tr))
     g1, g2 = st.columns([4, 1], vertical_alignment="bottom")
-    g1.markdown(f'<div class="pp-sub-title">단어표 · {len(rows)}개</div>', unsafe_allow_html=True)
+    g1.markdown(f'<div class="pp-sub-title">어려운 단어표 · {len(rows)}개</div>', unsafe_allow_html=True)
     g2.download_button("단어표 내려받기(CSV)", G.to_csv(rows), file_name="paperpath_glossary.csv", mime="text/csv",
                        key="glossary_csv", disabled=not rows, use_container_width=True)
     st.markdown(glossary_table(rows), unsafe_allow_html=True)
-    st.caption("약어·반복 용어·설명된 용어를 모았어요. 한국어는 '번역하기'를 누른 뒤 번역기가 옮긴 대응어라 참고용이에요.")
+    st.caption("일상 영어에서 드문 단어(전문용어)·약어·모델 이름만 모았어요. 난이도는 일상 영어 빈도 기준"
+               "(wordfreq, Zipf 3.0 미만 '상', 3.0~3.5 '중'). 한국어는 '번역하기'를 누른 뒤 번역기가 옮긴 대응어라 참고용이에요.")
 
     b1, b2 = st.columns(2)
     defined = {k: v for k, v in a.acronyms.items() if v}

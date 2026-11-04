@@ -45,3 +45,32 @@ def test_glossary_korean_from_translation_tags():
 def test_csv_has_bom_and_header():
     data = G.to_csv(G.build(analyze(TEXT)))
     assert data.startswith("﻿".encode("utf-8")) and "용어,종류".encode("utf-8") in data
+
+
+# ---------------------------------------------------------------- 어려운 단어(전문용어) 위주
+
+def test_easy_words_are_excluded_and_rare_words_have_levels():
+    t = ("A label is a sentence. The label marks each sentence. Every label and sentence matters. "
+         "We use a stochastic reranker with heuristic annotation.")
+    rows = {e.term.lower(): e for e in G.build(analyze(t))}
+    assert "label" not in rows and "sentence" not in rows          # 일상어(Zipf 4.0 이상)
+    assert rows["stochastic"].level == "중"                          # Zipf 3.11
+    assert rows["heuristic"].level == "상" and rows["reranker"].level == "상"
+
+
+def test_generic_academic_words_and_long_form_words_are_excluded():
+    t = "We propose a method. Retrieval-augmented generation (RAG) helps retrieval."
+    terms = {e.term.lower() for e in G.build(analyze(t))}
+    assert "propose" not in terms and "retrieval-augmented" not in terms and "rag" in terms
+
+
+def test_word_zipf_uses_base_forms():
+    assert G.word_zipf("baselines") == G.word_zipf("baseline") > 0
+    assert G.word_zipf("propagated") >= G.word_zipf("propagate") > 0
+    assert G.word_zipf("qzxwv") == 0.0
+
+
+def test_jargon_marks_are_for_translation_only():
+    a = analyze("A stochastic reranker helps.")
+    assert [a.text[x:y] for x, y, _ in G.jargon_marks(a)] == ["stochastic", "reranker"]
+    assert not any(m.category == "jargon" for m in a.marks)
