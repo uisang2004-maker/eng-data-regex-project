@@ -247,3 +247,24 @@ def test_find_table_by_caption_and_rules():
 def test_table_mentions():
     assert TB.mentioned("As Table 3 shows, and Tables 2 and 4, see Tab. 5; also Table 3 again.") == [3, 2, 4, 5]
     assert TB.mentioned("A stable table-like result.") == []
+
+
+def test_first_mentions_pick_sentence_for_cards():
+    from src.extract import analyze
+    a = analyze("We show results in Table 2. Fig. 3 plots the loss. Table 2 again and Figures 1 and 4 too.")
+    first = TB.first_mentions(a.text, a.sentences)
+    assert first[("table", 2)] == 0 and first[("figure", 3)] == 1
+    assert first[("figure", 1)] == 2 and first[("figure", 4)] == 2
+
+
+def test_find_figure_above_caption():
+    items = [(72, 720, "Body text before the figure is a long sentence with many words in it here."),
+             (100, 640, "Encoder"), (300, 640, "Decoder"),
+             (72, 560, "Figure 1: The model architecture with two blocks."),
+             (72, 520, "Body text after the figure is another long sentence with many words in it.")]
+    rules = [(90, 400, 660), (90, 400, 600)]          # 그림 요소(사각형 선) 두 개
+    figs = TB.find_figures(make_pdf_with_rules(items, rules))
+    assert [f.num for f in figs] == [1]
+    f = figs[0]
+    assert f.kind == "figure" and not f.whole_page and f.mime == "image/jpeg" and f.png[:2] == b"\xff\xd8"
+    assert f.caption.startswith("Figure 1: The model") and f.width > 0 and f.height > 0

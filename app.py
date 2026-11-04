@@ -22,7 +22,7 @@ from src.explain import MAX_TERMS, explain_terms
 from src.extract import ROLE_ORDER, analyze
 from src.pdf_text import PdfError, extract as extract_pdf
 from src.sections import PAGES as PAPER_PAGES, paper_pages, split_paper
-from src.tables import find_tables, mentioned as mentioned_tables
+from src.tables import find_figures, find_tables, first_mentions
 from src import saved as SV
 
 # 브라우저 저장(localStorage) 컴포넌트: components/browser_store/index.html. 화면에는 보이지 않는다
@@ -239,6 +239,26 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 
 /* 논문 표 */
 .pp-table-cap { font-size:13px; color:#2c4560; line-height:1.55; margin:10px 0 6px; }
+
+/* 본문 속 표·그림 카드(처음 언급한 문장 아래)와 마우스 미리보기 */
+.pp-flt { display:block; background-size:contain; background-repeat:no-repeat; background-position:left top;
+  background-color:#fff; }
+.pp-float { margin:4px 0 10px 34px; border:1px solid var(--line); border-left:3px solid #8b79b5; border-radius:10px;
+  background:#fbfaff; padding:8px 12px; }
+.pp-float summary { list-style:none; cursor:zoom-in; }
+.pp-float summary::-webkit-details-marker { display:none; }
+.pp-float details[open] summary { cursor:zoom-out; }
+.pp-float details[open] .pp-thumb { display:none; }
+.pp-float-head { font-size:13px; color:#2c4560; }
+.pp-float-cap { font-size:12.5px; color:#4a5d72; line-height:1.5; margin:3px 0 6px; }
+.pp-float .pp-thumb { border:1px solid #e6e9f0; border-radius:4px; }
+.pp-float .pp-full { margin-top:6px; border:1px solid #e6e9f0; border-radius:4px; }
+.pp-m:has(.pp-pop) { position:relative; }
+.pp-pop { display:none; position:absolute; left:0; top:1.7em; z-index:60; width:max-content; max-width:min(540px, 86vw);
+  background:#fff; border:1px solid #cfd8e3; border-radius:8px; box-shadow:0 8px 24px rgba(20,38,62,.18); padding:6px; }
+.pp-pop .pp-flt { max-width:84vw; }   /* 너비는 float_box가 원래 크기(최대 520px)로 정한다 */
+.pp-m:hover > .pp-pop, .pp-m:focus > .pp-pop { display:block; }
+@media (hover: none) { .pp-pop { display:none !important; } }
 
 /* 읽기 모드: 문장마다 한영 */
 .pp-pair-ko { display:flex; gap:8px; align-items:baseline; margin-top:6px; padding:6px 10px; background:#f6f9fc;
@@ -491,6 +511,10 @@ def load_pdf(data: bytes, name: str) -> str | None:
         ss.paper_tables = find_tables(data)       # 표 캡션(정규식) + 가로선으로 자른 표 이미지
     except Exception:                            # 표 찾기가 실패해도 본문 분석은 그대로 보여 준다
         ss.paper_tables = []
+    try:
+        ss.paper_figures = find_figures(data)     # 그림 캡션(정규식) + 캡션 위 그림 영역
+    except Exception:
+        ss.paper_figures = []
     paper.notes = [f"PDF {pdf.read_pages}쪽을 읽었어요" + (f"(2단 편집 {pdf.two_column_pages}쪽은 왼쪽 단 → 오른쪽 단 순서로)"
                                                        if pdf.two_column_pages else "") + "."] + pdf.notes + paper.notes
     ss.paper = paper
@@ -569,22 +593,26 @@ def render_layers(text: str, spans, underline=None) -> str:
         sp = next((sp for sp in spans if sp[0] == x and sp[1] == y), None)
         if sp:
             tip = esc(sp[3])
+            extra = sp[4] if len(sp) > 4 else ""        # 표·그림 미리보기처럼 표시 안에 넣을 HTML
             out.append(f'<span class="{sp[2]}" tabindex="0" title="{tip}" data-tip="{tip}" aria-label="{tip}">'
-                       f'{esc(text[x:y])}</span>')
+                       f'{esc(text[x:y])}{extra}</span>')
         else:
             out.append(esc(text[x:y]))
         out.extend("</span>" for w in wraps if w[1] == y)
     return "".join(out)
 
 
-def render_ko(ko: str, ko_marks, active, underline=None, en_tips: dict | None = None) -> str:
+def render_ko(ko: str, ko_marks, active, underline=None, en_tips: dict | None = None, pop=None) -> str:
     """번역문 형광펜·밑줄. 툴팁은 영어 원문의 같은 표시와 같은 설명(뜻·규칙)을 보여 주고,
-    위치는 번역기가 옮긴 태그에서 복원한 것이라 '영어 ○○에 대응'을 덧붙인다."""
+    위치는 번역기가 옮긴 태그에서 복원한 것이라 '영어 ○○에 대응'을 덧붙인다. pop=(표·그림 맥락, 문장 번호)."""
     spans, last = [], -1
     for a, b, cat, en in ko_marks:
         if CAT_RULE.get(cat) in active and a >= last:
             tip = (en_tips or {}).get((cat, (en or "").lower())) or MARK_LABEL[cat]
-            spans.append((a, b, f"pp-m {cat}", f"{tip} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)"))
+            extra = ""
+            if cat == "reference" and pop and pop[0]:
+                _, extra = float_pop(en or "", pop[1], pop[0])
+            spans.append((a, b, f"pp-m {cat}", f"{tip} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)", extra))
             last = b
     return render_layers(ko, spans, underline)
 
@@ -636,10 +664,20 @@ def translation_layers(raw_text: str):
 
 def render_marked(text: str, start: int, end: int, marks, underline=None) -> str:
     """원문 문장(text[start:end]) 렌더링. underline은 문장 안 위치."""
-    tips = st.session_state.get("term_tips", {}).get(text_key(text), {})
-    spans = [(max(m.start, start) - start, min(m.end, end) - start, f"pp-m {m.category}",
-              term_tip(text[m.start:m.end], m.tip, tips) if m.category == "term" else mark_tip(m))
-             for m in marks if m.end > start and m.start < end]
+    ss = st.session_state
+    tips = ss.get("term_tips", {}).get(text_key(text), {})
+    ctx = ss.get("float_ctx", {}).get(text_key(text))
+    spans = []
+    for m in marks:
+        if not (m.end > start and m.start < end):
+            continue
+        phrase = text[m.start:m.end]
+        tip = term_tip(phrase, m.tip, tips) if m.category == "term" else mark_tip(m)
+        extra = ""
+        if m.category == "reference" and ctx:          # 'Table 2'·'Fig. 3': 마우스를 올리면 그 표·그림 미리보기
+            more, extra = float_pop(phrase, ctx[2].get(start), ctx[:2])
+            tip += more
+        spans.append((max(m.start, start) - start, min(m.end, end) - start, f"pp-m {m.category}", tip, extra))
     return render_layers(text[start:end], spans, underline)
 
 
@@ -783,10 +821,12 @@ def paper_overview(paper) -> None:
                     f'<tbody>{"".join(rows)}</tbody></table></div>', unsafe_allow_html=True)
 
     tables = ss.get("paper_tables") or []
-    with st.expander(f"논문의 표 모아보기 · {len(tables)}개"):
-        if not tables:
-            st.caption("'Table 1:'처럼 시작하는 표 설명(캡션)을 찾지 못했어요.")
-        for t in tables:
+    figures = ss.get("paper_figures") or []
+    with st.expander(f"논문의 표·그림 모아보기 · 표 {len(tables)}개 · 그림 {len(figures)}개"):
+        st.caption("본문을 읽을 때는 표·그림을 처음 언급한 문장 바로 아래에 넣어 보여 줘요. 여기는 전체 목록이에요.")
+        if not tables and not figures:
+            st.caption("'Table 1:'·'Figure 1:'처럼 시작하는 설명(캡션)을 찾지 못했어요.")
+        for t in tables + figures:
             table_card(t, "all")
 
     with st.expander("논문 전체 어려운 단어표"):
@@ -1043,7 +1083,8 @@ def ko_html(res, i: int, a, off=None) -> str:
         extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
     body = render_ko(res.ko[i], marks_ko[i] if i < len(marks_ko) else [], a.active_rules,
                      as_wrappers(uls_ko[i]) if i < len(uls_ko) else None,
-                     en_tips(a, i) if i < len(a.sentences) else None)
+                     en_tips(a, i) if i < len(a.sentences) else None,
+                     (cur_float_ctx(a)[:2], i))
     return f'<div class="pp-text">{body}</div>{extra}'
 
 
@@ -1062,11 +1103,10 @@ def current_translation(a):
 
 def table_card(t, prefix: str) -> None:
     """표 하나: 번호·쪽·캡션, 잘라 낸 이미지, 칸이 깔끔하면 '표로 보기'(CSV)."""
-    where = "쪽 전체(표 영역을 찾지 못함)" if t.whole_page else "표 영역"
-    st.markdown(f'<div class="pp-table-cap"><b>Table {t.num}</b> <span class="pp-meta">· {t.page}쪽 · {where}</span><br>'
+    where = "쪽 전체(영역을 찾지 못함)" if t.whole_page else ("표 영역" if t.kind == "table" else "그림 영역")
+    st.markdown(f'<div class="pp-table-cap"><b>{esc(t.label)}</b> <span class="pp-meta">· {t.page}쪽 · {where}</span><br>'
                 f'{esc(t.caption)}</div>', unsafe_allow_html=True)
-    width = int.from_bytes(t.png[16:20], "big")      # PNG 머리의 가로 픽셀. 좁은 표를 억지로 늘리지 않는다
-    st.image(t.png, width=min(width, 900))
+    st.image(t.png, width=min(t.width or 900, 900))    # 좁은 표를 억지로 늘리지 않는다
     if t.grid:
         with st.expander(f"Table {t.num} 표로 보기(자동 인식, 원본 이미지와 비교해 주세요)"):
             import pandas as pd
@@ -1079,19 +1119,76 @@ def table_card(t, prefix: str) -> None:
                                file_name=f"table_{t.num}.csv", mime="text/csv", key=f"tcsv_{prefix}_{t.num}")
 
 
-def mentioned_table_panel(a) -> None:
-    """지금 읽는 글이 'Table 3'처럼 가리킨 표를 원문 바로 아래에서 펼쳐 볼 수 있게 한다(정규식 TABLE_MENTION)."""
+def float_context(a) -> tuple[dict, dict]:
+    """지금 글이 언급하는 표·그림과 처음 언급한 문장(정규식 TABLE_MENTION·FIGURE_MENTION).
+    ({(table|figure, 번호): TableInfo}, {(table|figure, 번호): 문장 번호}). PDF가 아니면 비어 있다."""
     ss = st.session_state
-    tables = {t.num: t for t in ss.get("paper_tables") or []} if ss.source["kind"] == "pdf" else {}
-    nums = [n for n in mentioned_tables(a.text) if n in tables]
-    if not nums:
-        return
-    st.markdown(f'<div class="pp-sub-title">이 글에서 언급한 표 · {", ".join(f"Table {n}" for n in nums)}</div>',
-                unsafe_allow_html=True)
-    for n in nums:
-        cap = tables[n].caption
-        with st.expander(f"{cap[:80]}{'…' if len(cap) > 80 else ''} · {tables[n].page}쪽"):
-            table_card(tables[n], "ref")
+    if ss.source["kind"] != "pdf":
+        return {}, {}
+    pool = {("table", t.num): t for t in ss.get("paper_tables") or []}
+    pool |= {("figure", f.num): f for f in ss.get("paper_figures") or []}
+    first = {k: i for k, i in first_mentions(a.text, a.sentences).items() if k in pool}
+    return {k: pool[k] for k in first}, first
+
+
+def cur_float_ctx(a) -> tuple:
+    """reading_page가 저장해 둔 지금 글의 (표·그림, 처음 언급 문장, 문장 시작 위치 → 번호)."""
+    return st.session_state.get("float_ctx", {}).get(text_key(a.text)) or ({}, {}, {})
+
+
+def float_style(floats: dict) -> str:
+    """표·그림 이미지를 CSS 클래스 하나에 한 번만 싣는다(본문 카드·마우스 미리보기가 같은 이미지를 나눠 씀)."""
+    import base64
+    rules = "".join(f".pp-flt-{k}-{n}{{background-image:url(data:{t.mime};base64,{base64.b64encode(t.png).decode()})}}"
+                    for (k, n), t in floats.items())
+    return f"<style>{rules}</style>" if rules else ""
+
+
+def float_box(key, t, cls: str, max_w: int, max_h: int | None = None, fixed: bool = False) -> str:
+    """이미지 자리(배경 이미지 + 원래 가로세로 비율). max_h를 주면 그 높이에 맞춰 줄인 미리보기.
+    fixed면 너비를 픽셀로 고정한다(마우스 미리보기 상자는 내용 너비를 따르므로 %를 쓰면 0이 된다)."""
+    w = t.width or 600
+    if max_h and t.height:
+        w = min(w, int(max_h * t.width / t.height))
+    ratio = f"{t.width or 4} / {t.height or 3}"
+    return (f'<span class="pp-flt pp-flt-{key[0]}-{key[1]} {cls}" role="img" aria-label="{esc(t.label)}" '
+            f'style="aspect-ratio:{ratio}; width:{f"{min(w, max_w)}px" if fixed else f"min(100%, {min(w, max_w)}px)"}"></span>')
+
+
+def float_cards(i: int, ctx) -> str:
+    """i번째 문장이 처음 언급한 표·그림 카드: 작은 미리보기, 누르면 원래 크기."""
+    floats, first = ctx[0], ctx[1]
+    out = []
+    for key, idx in first.items():
+        if idx != i:
+            continue
+        t = floats[key]
+        icon = "📊" if t.kind == "table" else "🖼️"
+        where = " · 쪽 전체(영역을 찾지 못함)" if t.whole_page else ""
+        cap = t.caption if len(t.caption) <= 160 else t.caption[:159] + "…"
+        out.append(f'<div class="pp-float"><details><summary><div class="pp-float-head">{icon} <b>{esc(t.label)}</b>'
+                   f' <span class="pp-meta">· {t.page}쪽{where} · 누르면 크게</span></div>'
+                   f'<div class="pp-float-cap">{esc(cap)}</div>{float_box(key, t, "pp-thumb", 640, 170)}</summary>'
+                   f'{float_box(key, t, "pp-full", 900)}</details></div>')
+    return "".join(out)
+
+
+def float_pop(phrase: str, sent_idx: int | None, ctx) -> tuple[str, str]:
+    """'Table 2'·'Fig. 3' 표시에 붙일 (툴팁 덧말, 마우스를 올리면 뜨는 미리보기 HTML)."""
+    floats, first = ctx[0], ctx[1]
+    for kind, pat in (("table", P.TABLE_MENTION), ("figure", P.FIGURE_MENTION)):
+        m = pat.search(phrase)
+        if not m:
+            continue
+        n = int(re.findall(r"\d+", m.group(0))[0])
+        key = (kind, n)
+        if key not in floats:
+            return "", ""
+        idx = first[key]
+        where = "바로 아래에 있어요" if idx == sent_idx else f"문장 {idx + 1} 아래에 있어요"
+        return (f" · {floats[key].label}: {where}(마우스를 올리면 미리보기)",
+                f'<span class="pp-pop">{float_box(key, floats[key], "", 520, fixed=True)}</span>')
+    return "", ""
 
 
 def interleaved_panel(a) -> None:
@@ -1101,19 +1198,21 @@ def interleaved_panel(a) -> None:
     off = ss.translations.get((text_key(a.text), False))
     uls = card_underlines(a)
     rows = []
+    ctx = cur_float_ctx(a)
     for s in a.sentences:
         ko = (f'<div class="pp-pair-ko"><span class="pp-lang">KO</span>{ko_html(res, s.idx, a, off)}</div>'
               if res and s.idx < len(res.ko) else "")
         rows.append(f'<div class="pp-sent pp-pair"><div class="pp-no">{s.idx + 1}</div><div>'
-                    f'<div class="pp-pair-en">{en_html(a, s, uls)}</div>{ko}</div></div>')
+                    f'<div class="pp-pair-en">{en_html(a, s, uls)}</div>{ko}</div></div>{float_cards(s.idx, ctx)}')
     note = "" if res else '<span class="pp-meta"> · 아래 번역 칸에서 번역하면 문장마다 한국어가 붙어요</span>'
     st.markdown(f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
                 f'<span class="pp-lang">EN·KO</span>문장마다 한영 <span class="pp-meta">· {len(a.sentences)}문장</span>'
                 f'{note}</div></div><div class="pp-sents">{"".join(rows)}</div></div>', unsafe_allow_html=True)
 
 
-def translation_panel(a, rows_on: bool = True) -> None:
-    """한국어 번역 칸. rows_on=False면 번역 문장 없이 버튼·안내·사용량만(문장마다 한영 모드)."""
+def translation_panel(a, rows_on: bool = True, floats_on: bool = False) -> None:
+    """한국어 번역 칸. rows_on=False면 번역 문장 없이 버튼·안내·사용량만(문장마다 한영 모드).
+    floats_on이면(한국어만 모드) 표·그림을 처음 언급한 문장 아래에 끼운다."""
     ss = st.session_state
     sents = [s.text for s in a.sentences]
     tkey = text_key(a.text)
@@ -1158,8 +1257,9 @@ def translation_panel(a, rows_on: bool = True) -> None:
                     unsafe_allow_html=True)
         off = ss.translations.get((tkey, False))
         if res.ko is not None and rows_on:
+            ctx = cur_float_ctx(a)
             rows = [f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div><div>{ko_html(res, i, a, off)}</div></div>'
-                    for i in range(len(res.ko))]
+                    + (float_cards(i, ctx) if floats_on else "") for i in range(len(res.ko))]
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         elif res.ko is not None:
             st.markdown('<div class="pp-meta">번역 문장은 위 원문 문장마다 바로 아래에 붙었어요.</div>', unsafe_allow_html=True)
@@ -1214,6 +1314,8 @@ def reading_page() -> None:
 
     a = analyze(ss.input_text, frozenset(ss.active_rules))
     ss.term_tips = {text_key(a.text): term_meanings(a, ss.translations.get((text_key(a.text), True)))}
+    floats, first = float_context(a)
+    ss.float_ctx = {text_key(a.text): (floats, first, {s.start: s.idx for s in a.sentences})}
 
     where = f" · {ss.source['section']}" if ss.source["kind"] == "pdf" else ""
     st.markdown(sec_head("01", f"먼저 읽을 3줄 뼈대{where}", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
@@ -1250,8 +1352,11 @@ def reading_page() -> None:
                              label_visibility="collapsed")
     mode = ss.read_mode or READ_MODES[0]       # 같은 버튼을 다시 눌러 선택이 풀려도 기본 모드로 보여 준다
     uls = card_underlines(a)
+    ctx = cur_float_ctx(a)
+    if ctx[0]:
+        st.markdown(float_style(ctx[0]), unsafe_allow_html=True)   # 이 글이 언급한 표·그림 이미지(한 번만)
     rows = "".join(f'<div class="pp-sent"><div class="pp-no">{s.idx + 1}</div>{en_html(a, s, uls)}</div>'
-                   for s in a.sentences)
+                   f'{float_cards(s.idx, ctx)}' for s in a.sentences)   # 처음 언급한 문장 바로 아래에 표·그림
     en_panel = (f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
                 f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {len(a.sentences)}문장</span></div>'
                 f'<div class="pp-meta">표현에 마우스를 올리거나 Tab으로 이동하면 정의와 규칙이 보여요</div></div>'
@@ -1267,8 +1372,10 @@ def reading_page() -> None:
     elif mode == "en":
         st.markdown(en_panel, unsafe_allow_html=True)
     else:
-        translation_panel(a)
-    mentioned_table_panel(a)
+        translation_panel(a, floats_on=True)
+    if ctx[0]:
+        st.caption(f"이 글에 나온 표·그림 {len(ctx[0])}개({', '.join(t.label for t in ctx[0].values())})는 처음 언급한 "
+                   "문장 바로 아래에 넣었어요. 'Table 2'·'Fig. 3' 표시에 마우스를 올리면 미리보기가 떠요.")
 
     st.markdown(sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),
                 unsafe_allow_html=True)

@@ -495,6 +495,12 @@ TABLE_CAPTION = re.compile(r"^(?:Table|TABLE)\s+(?P<num>\d{1,2})\s*[:.|]\s*\S")
 FIGURE_CAPTION = re.compile(r"^(?:Figure|Fig\.|FIGURE)\s*\d{1,2}\s*[:.|]")
 """그림 설명 첫 줄. 표 영역을 넓혀 가다가 이것을 만나면 멈춘다."""
 
+FIGURE_CAPTION_NUM = re.compile(r"^(?:Figure|Fig\.|FIGURE)\s*(?P<num>\d{1,2})\s*[:.|]\s*\S")
+"""그림 설명(캡션) 첫 줄과 번호: ``Figure 1: The Transformer - model architecture.``, ``Fig. 2. ...``."""
+
+FIGURE_MENTION = re.compile(r"\b(?:Figures?|Figs?\.)\s*\d{1,2}(?:\s*(?:,|and|&|–|-)\s*\d{1,2})*\b")
+"""본문에서 그림을 가리키는 말: ``Figure 3``, ``Fig. 2``, ``Figures 1 and 4``. 그림을 그 문장 아래에 끼우는 데 쓴다."""
+
 TABLE_MENTION = re.compile(r"\b(?:Tables?|Tab\.)\s+\d{1,2}(?:\s*(?:,|and|&|–|-)\s*\d{1,2})*\b")
 """본문에서 표를 가리키는 말: ``Table 3``, ``Tables 2 and 4``, ``Tab. 5``. 화면에서 그 표를 바로 보여 주는 데 쓴다."""
 

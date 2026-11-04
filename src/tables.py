@@ -30,9 +30,17 @@ class TableInfo:
     num: int
     caption: str
     page: int                                   # 1부터
-    png: bytes = b""
-    whole_page: bool = False                    # 표 영역을 못 찾아 쪽 전체를 보여 주는지
-    grid: list[list[str]] = field(default_factory=list)   # 칸이 깔끔하게 나뉜 경우만
+    png: bytes = b""                            # 이미지(표는 PNG, 그림은 JPEG)
+    whole_page: bool = False                    # 영역을 못 찾아 쪽 전체를 보여 주는지
+    grid: list[list[str]] = field(default_factory=list)   # 칸이 깔끔하게 나뉜 표만
+    kind: str = "table"                         # table / figure
+    width: int = 0                              # 이미지 픽셀 크기(화면에서 비율 맞추기)
+    height: int = 0
+    mime: str = "image/png"
+
+    @property
+    def label(self) -> str:
+        return f"{'Table' if self.kind == 'table' else 'Figure'} {self.num}"
 
 
 @dataclass
@@ -143,6 +151,17 @@ def _png(img) -> bytes:
     return buf.getvalue()
 
 
+def _info(num, caption, pn, img, **kw) -> TableInfo:
+    """이미지와 크기를 담는다. 그림은 사진이 섞여 있어 JPEG로 줄인다."""
+    if kw.get("kind") == "figure":
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=82, optimize=True)
+        data, mime = buf.getvalue(), "image/jpeg"
+    else:
+        data, mime = _png(img), "image/png"
+    return TableInfo(num, caption, pn + 1, data, width=img.width, height=img.height, mime=mime, **kw)
+
+
 def _grid(region) -> list[list[str]]:
     """칸이 깔끔하게 나뉘면 행 목록, 아니면 빈 목록(이미지만 보여 준다)."""
     try:
@@ -184,20 +203,105 @@ def find_tables(data: bytes) -> list[TableInfo]:
             page = pdf.pages[pn]
             if box:
                 region = page.crop(box)
-                info = TableInfo(num, caption, pn + 1, _png(region.to_image(resolution=RESOLUTION).original),
-                                 grid=_grid(region))
+                info = _info(num, caption, pn, region.to_image(resolution=RESOLUTION).original, grid=_grid(region))
             else:
-                info = TableInfo(num, caption, pn + 1, _png(page.to_image(resolution=90).original), whole_page=True)
+                info = _info(num, caption, pn, page.to_image(resolution=90).original, whole_page=True)
             out.append(info)
             page.flush_cache()
     return out
 
 
-def mentioned(text: str) -> list[int]:
-    """글에서 언급한 표 번호(처음 나온 순서): ``Table 3``, ``Tables 2 and 4``, ``Tab. 5``."""
+def mentioned(text: str, pattern: re.Pattern = P.TABLE_MENTION) -> list[int]:
+    """글에서 언급한 번호(처음 나온 순서): ``Table 3``, ``Tables 2 and 4``, ``Tab. 5``. 그림은 FIGURE_MENTION."""
     nums: list[int] = []
-    for m in P.TABLE_MENTION.finditer(text):
+    for m in pattern.finditer(text):
         for n in re.findall(r"\d+", m.group(0)):
             if int(n) not in nums:
                 nums.append(int(n))
     return nums
+
+
+def first_mentions(text: str, sentences) -> dict[tuple[str, int], int]:
+    """(table|figure, 번호) → 처음 언급한 문장 번호. 표·그림을 그 문장 바로 아래에 끼우는 자리."""
+    out: dict[tuple[str, int], int] = {}
+    for kind, pat in (("table", P.TABLE_MENTION), ("figure", P.FIGURE_MENTION)):
+        for m in pat.finditer(text):
+            idx = next((s.idx for s in sentences if s.start <= m.start() < s.end), None)
+            if idx is None:
+                continue
+            for n in re.findall(r"\d+", m.group(0)):
+                out.setdefault((kind, int(n)), idx)
+    return out
+
+
+# ---------------------------------------------------------------- 그림(Figure)
+
+FIG_RESOLUTION = 110
+MIN_FIG_HEIGHT = 30.0
+
+
+def _figure_box(page, cap: _Seg, segs: list[_Seg], body: float) -> tuple[float, float, float, float] | None:
+    """캡션 위쪽의 그림 영역. AI 논문 그림은 대부분 캡션이 그림 아래에 있다.
+    가로: 캡션이 한 단 안에 있으면 그 단, 아니면 쪽 글 폭. 세로: 캡션 위로 가장 가까운 본문 문장(또는 다른 캡션)
+    아래부터 캡션 위까지. 그 사이에 그림 요소(이미지·선·도형)가 있으면 그 범위로 좁힌다."""
+    mid = float(page.width) / 2
+    left = min((s.x0 for s in segs), default=36.0)
+    right = max((s.x1 for s in segs), default=float(page.width) - 36)
+    if cap.x1 <= mid + 1 and right > mid + 20:
+        x0, x1 = left, mid - 2
+    elif cap.x0 >= mid - 1 and left < mid - 20:
+        x0, x1 = mid + 2, right
+    else:
+        x0, x1 = left, right
+    blockers = [s for s in segs if s.bottom <= cap.top + 1 and _overlap(s.x0, s.x1, x0, x1) > 0
+                and (_is_prose(s, body) or P.TABLE_CAPTION.match(s.text) or P.FIGURE_CAPTION.match(s.text))]
+    # 위에 막는 글이 없으면(쪽 맨 위 그림) 쪽 위쪽 여백부터
+    top = max((s.bottom for s in blockers), default=min([s.top for s in segs if s.bottom <= cap.top] + [40.0]))
+    bottom = cap.top
+    if bottom - top < MIN_FIG_HEIGHT:
+        return None
+    objs = [o for o in page.images + page.rects + page.curves + page.lines
+            if o["top"] >= top - 1 and o["bottom"] <= bottom + 1 and _overlap(o["x0"], o["x1"], x0, x1) > 0]
+    if objs:
+        gtop = min(o["top"] for o in objs)
+        labels = [s for s in segs if gtop - 14 <= s.top and s.bottom <= bottom and _overlap(s.x0, s.x1, x0, x1) > 0
+                  and not _is_prose(s, body)]      # 그림 안 글자(축 이름·범례)도 넣는다
+        top = max(top, min([gtop] + [s.top for s in labels]) - PAD)
+        x0 = max(x0, min([o["x0"] for o in objs] + [s.x0 for s in labels]) - PAD)
+        x1 = min(x1, max([o["x1"] for o in objs] + [s.x1 for s in labels]) + PAD)
+    return (max(0.0, x0), max(0.0, top), min(float(page.width), x1), min(float(page.height), bottom - 1))
+
+
+def find_figures(data: bytes) -> list[TableInfo]:
+    """그림 캡션(정규식 FIGURE_CAPTION_NUM)을 찾고 그 위의 그림 영역을 이미지로 자른다. 못 찾으면 쪽 전체."""
+    import pdfplumber
+
+    found: dict[int, tuple] = {}
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        pages = pdf.pages[:MAX_PAGES]
+        body = median([s.size for p in pages[:3] for s in _segments(p)] or [10.0])
+        for pn, page in enumerate(pages):
+            segs = _segments(page)
+            for cap in segs:
+                m = P.FIGURE_CAPTION_NUM.match(cap.text)
+                if not m:
+                    continue
+                caption, _ = _caption_block(cap, segs)
+                box = _figure_box(page, cap, segs, body)
+                score = (box is not None, cap.size < body - 0.3)
+                num = int(m.group("num"))
+                if num not in found or score > found[num][0]:
+                    found[num] = (score, pn, box, caption)
+            page.flush_cache()
+        out = []
+        for num in sorted(found)[:MAX_TABLES]:
+            _, pn, box, caption = found[num]
+            page = pdf.pages[pn]
+            if box:
+                img = page.crop(box).to_image(resolution=FIG_RESOLUTION).original
+                out.append(_info(num, caption, pn, img, kind="figure"))
+            else:
+                out.append(_info(num, caption, pn, page.to_image(resolution=80).original, kind="figure",
+                                 whole_page=True))
+            page.flush_cache()
+    return out

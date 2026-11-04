@@ -257,3 +257,21 @@ def test_korean_highlight_tooltip_matches_english(at):
     out = H.unescape(md_text(at))
     assert "reranker: 검색 결과 순위를 다시 매기는 모델 · 이 글에 4번 · 영어 'reranker'에 대응" in out
     assert "추측·가능성" in out and "영어 'may'에 대응" in out
+
+
+def test_tables_and_figures_inline_after_first_mention(at):
+    from src.tables import TableInfo
+
+    at.session_state["input_text"] = ("We describe the model. Results are in Table 1 and Figure 2. "
+                                      "As Table 1 shows, the gains are large.")
+    at.session_state["source"] = {"kind": "pdf", "title": "t", "section": "본문", "page": "본문"}
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 20
+    at.session_state["paper_tables"] = [TableInfo(1, "Table 1: Scores.", 3, png, width=400, height=100)]
+    at.session_state["paper_figures"] = [TableInfo(2, "Figure 2: Curves.", 4, b"\xff\xd8xx", kind="figure",
+                                                   width=300, height=200, mime="image/jpeg")]
+    at.run()
+    assert not at.exception
+    text = "\n".join(m.value for m in at.markdown)
+    assert ".pp-flt-table-1{background-image:url(data:image/png;base64," in text
+    assert text.count('class="pp-float"') == 2                       # 표 1·그림 2, 처음 언급한 문장 아래 한 번씩
+    assert 'class="pp-pop"' in text and "Table 1: 문장 2 아래에 있어요" in text   # 3번째 문장의 두 번째 언급
