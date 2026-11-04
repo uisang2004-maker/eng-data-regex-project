@@ -203,7 +203,7 @@ def test_translate_returns_ko_underlines():
 
     r = T.translate(["However, selecting evidence remains hard."], {}, underlines=[(9, 40, "problem")],
                     caller=fake, api_key="k")
-    a, b, kind = r.ko_underlines[0]
+    [(a, b, kind)] = r.ko_underlines[0]
     assert r.ko[0][a:b] == "증거 선별은 여전히 어렵다" and kind == "problem"
 
 
@@ -224,4 +224,19 @@ def test_cache_recomputes_from_raw_without_calling_again():
     args = dict(underlines=[(9, 40, "problem")], caller=fake, api_key="k")
     T.translate(["However, selecting evidence remains hard."], {}, **args)
     again = T.translate(["However, selecting evidence remains hard."], {}, **args)
-    assert n["calls"] == 1 and again.cached and again.ko_underlines[0] is not None
+    assert n["calls"] == 1 and again.cached and again.ko_underlines[0]
+
+
+def test_to_xml_multiple_underlines_keep_order_and_drop_overlap():
+    s = "We propose GMM-LDA, a topic model, to analyze text."
+    x = T.to_xml(s, masked=False, underline=[(11, 51, "method"), (20, 33, "def")])
+    assert x.count("<u ") == 1 and 'c="u-method" i="0"' in x      # 겹치는 용어 설명 밑줄은 버림
+    x2 = T.to_xml(s, masked=False, underline=[(20, 33, "def"), (37, 51, "method")])
+    assert x2.count("<u ") == 2 and 'i="1"' in x2
+
+
+def test_ko_underlines_multiple():
+    raw = '<u c="u-def" i="0">주제 모델</u>인 GMM-LDA로 <u c="u-method" i="1">텍스트를 분석</u>한다.'
+    plain = T.fix_korean(T.unprotect(raw))
+    got = [(plain[a:b], k) for a, b, k in T.ko_underlines_from_xml(raw, plain)]
+    assert got == [("주제 모델", "def"), ("텍스트를 분석한다", "method")]

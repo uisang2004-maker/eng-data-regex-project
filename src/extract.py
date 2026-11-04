@@ -54,6 +54,7 @@ class Analysis:
     limit_idx: list[int]
     counts: dict[str, int]
     active_rules: frozenset = field(default_factory=frozenset)
+    explanations: list[tuple[int, int, str]] = field(default_factory=list)   # 용어 설명 구간(점선 밑줄)과 툴팁
 
 
 # ---------------------------------------------------------------- 약어 (P0-3)
@@ -119,7 +120,7 @@ def find_acronyms(text: str) -> dict[str, str | None]:
 
 # ---------------------------------------------------------------- 단어 단위 표시 (P0-3, P0-4)
 
-PRIORITY = {"reference": 0, "abbr": 1, "abbr-missing": 1, "confident": 2, "hedge": 3}
+PRIORITY = {"reference": 0, "abbr": 1, "abbr-missing": 1, "number": 2, "definition": 2, "confident": 3, "hedge": 4}
 
 
 def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> list[Mark]:
@@ -137,6 +138,12 @@ def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> lis
     if "CONFIDENT" in active:
         for m in P.CONFIDENT.finditer(text):
             marks.append(Mark(m.start(), m.end(), "confident", "CONFIDENT", f"확신 · {P.CONFIDENT_RULE.reason}"))
+    if "NUMBER" in active:
+        for m in P.EVIDENCE_NUMBER.finditer(text):
+            marks.append(Mark(m.start(), m.end(), "number", "NUMBER", f"수치 근거 · {P.NUMBER_RULE.reason}"))
+    if "DEFINITION" in active:
+        for m in P.DEFINITION_CUE.finditer(text):
+            marks.append(Mark(m.start(), m.end(), "definition", "DEFINITION", f"용어 설명·예시 · {P.DEFINITION_RULE.reason}"))
     if "HEDGE" in active:
         excluded = [(m.start(), m.end()) for m in P.HEDGE_EXCLUDE.finditer(text)] if "HEDGE_EXCLUDE" in active else []
         for m in P.HEDGE.finditer(text):
@@ -144,7 +151,7 @@ def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> lis
                 continue
             marks.append(Mark(m.start(), m.end(), "hedge", "HEDGE", f"추측·가능성 · {P.HEDGE_RULE.reason}"))
 
-    # 겹치면 우선순위(참조 > 약어 > 확신 > 추측)가 높은 것, 같으면 긴 것을 남긴다.
+    # 겹치면 우선순위(참조 > 약어 > 수치·용어 설명 > 확신 > 추측)가 높은 것, 같으면 긴 것을 남긴다.
     marks.sort(key=lambda x: (PRIORITY[x.category], -(x.end - x.start), x.start))
     kept: list[Mark] = []
     for mk in marks:
@@ -213,6 +220,63 @@ def underline_span(kind: str, s: str, signal: tuple[int, int]) -> tuple[int, int
     if m:
         end = b + m.start()
     return _cap(s, _after(s, start), end, stop)
+
+
+# ---------------------------------------------------------------- 용어 설명 구간
+
+EXAMPLE_CUES = ("such as", "including", "for example", "for instance", "namely", "e.g.")
+
+
+def _term_before(text: str, pos: int) -> str:
+    """설명 신호 앞의 용어(최대 4단어)를 툴팁용으로 고른다."""
+    head = text[max(0, pos - 80):pos].rstrip(" ,(")
+    words = re.findall(r"[A-Za-z0-9][\w-]*", head)[-3:]
+    while words and words[0].lower() in {"we", "our", "this", "the", "a", "an", "is", "are", "and", "of", "to", "it"}:
+        words.pop(0)
+    return " ".join(words)
+
+
+def explanation_spans(text: str, sentences: list[Sentence]) -> list[tuple[int, int, str]]:
+    """용어 설명·예시 신호 뒤의 설명 구간(점선 밑줄). 문장을 넘지 않고, 12단어 이내."""
+    out: list[tuple[int, int, str]] = []
+
+    def add(a: int, b: int, tip: str) -> None:
+        sent = next((s for s in sentences if s.start <= a < s.end), None)
+        if sent is None:
+            return
+        b = min(b, sent.end)
+        seg = text[a:b]
+        words = list(re.finditer(r"\S+", seg))
+        if len(words) > P.UNDERLINE_MAX_WORDS:
+            seg = P.UL_TRAILING_FUNCTION.sub("", seg[:words[P.UNDERLINE_MAX_WORDS - 1].end()])
+        seg = seg.rstrip(" ,.;:")
+        if seg.endswith(")") and seg.count("(") < seg.count(")"):
+            seg = seg[:-1].rstrip()
+        if len(re.findall(r"[A-Za-z0-9]+", seg)) >= 1 and all(b0 <= a or a0 >= a + len(seg) for a0, b0, _ in out):
+            out.append((a, a + len(seg), tip))
+
+    for m in P.DEFINITION_CUE.finditer(text):
+        cue = m.group(0).lower()
+        start = m.end() + len(re.match(r"[\s,]*", text[m.end():]).group(0))
+        rest = text[start:]
+        if cue.startswith(("i.e", "e.g")) and text[m.start() - 1:m.start()] == "(":
+            stop = re.search(r"\)", rest)                       # (i.e., …) → 닫는 괄호까지
+        elif any(cue.startswith(c) for c in EXAMPLE_CUES):
+            stop = re.search(r"[.;]|,\s(?:which|and\s+(?:we|it|they)|but|while)", rest)   # 예시 목록은 쉼표로 끊지 않음
+        else:
+            stop = re.search(r"[,.;)]", rest)
+        end = start + (stop.start() if stop else len(rest))
+        if text[start:end].count("(") > text[start:end].count(")"):   # '(NLI' 처럼 괄호가 열린 채 끝나면 닫는 괄호까지
+            close = text.find(")", end)
+            end = close + 1 if close > 0 else end
+        kind = "예시" if any(cue.startswith(c) for c in EXAMPLE_CUES) else "설명"
+        term = "" if cue.startswith(("i.e", "that is", "namely")) else _term_before(text, m.start())
+        add(start, end, f"용어 {kind} · '{term}'의 {kind}" if term else f"용어 {kind} · 앞 내용을 풀어 쓴 부분")
+    for m in P.APPOSITIVE.finditer(text):
+        a = m.start("art")
+        b = text.find(",", a)
+        add(a, b if b > 0 else a, f"용어 설명 · '{m.group('term')}'의 설명(동격)")
+    return sorted(out)
 
 
 # ---------------------------------------------------------------- 3줄 뼈대 (P0-2)
@@ -288,10 +352,13 @@ def analyze(raw: str, active_rules: frozenset | set | None = None) -> Analysis:
     acronyms = find_acronyms(text)
     marks = _marks(text, acronyms, active)
     skeleton, limits = select_skeleton(sentences, use_fallback="SK_FALLBACK" in active)
+    explanations = explanation_spans(text, sentences) if "DEFINITION" in active else []
     counts = {
         "abbr": len(acronyms) if "ABBR" in active else 0,
         "hedge": sum(m.category == "hedge" for m in marks),
         "confident": sum(m.category == "confident" for m in marks),
         "reference": sum(m.category == "reference" for m in marks),
+        "definition": len(explanations),
+        "number": sum(m.category == "number" for m in marks),
     }
-    return Analysis(text, cleaned.removed_lines, sentences, acronyms, marks, skeleton, limits, counts, active)
+    return Analysis(text, cleaned.removed_lines, sentences, acronyms, marks, skeleton, limits, counts, active, explanations)

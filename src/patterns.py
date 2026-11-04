@@ -167,7 +167,53 @@ REFERENCE_RULE = Rule(
     toggleable=True,
 )
 
-TOKEN_RULES = (ABBR_RULE, HEDGE_RULE, HEDGE_EXCLUDE_RULE, CONFIDENT_RULE, REFERENCE_RULE)
+DEFINITION_CUE = re.compile(
+    r"\b(?:refers? to|is defined as|are defined as|we define|(?:is|are) (?:called|termed|known as|denoted (?:as|by))"
+    r"|(?:known|referred to) as)\b"
+    r"|(?<=,\s)which\s+(?:is|are|aims? to|refers? to|consists? of|describes?|means|denotes|enables?|allows?"
+    r"|uses?|captures?|measures?)\b"
+    r"|(?<=\()(?:i\.e\.|e\.g\.),?"
+    r"|\b(?:such as|including|for example|for instance|namely|that is,)(?=\s)"
+    r"|\bi\.e\.,?(?=\s)",
+    re.I,
+)
+"""용어 설명·예시 신호: 'refers to', 'is defined as', ', which is/aims to …', '(i.e., …)', 'such as', 'including'.
+
+신호어에 형광펜을, 그 뒤의 설명 구간(쉼표·마침표·괄호 앞, 12단어 이내)에 점선 밑줄을 긋는다(extract.py).
+샘플 300편 중 131편(44%)에서 잡힌다(2026-11-04).
+"""
+
+APPOSITIVE = re.compile(r"\b(?P<term>[A-Z][A-Za-z0-9]*(?:[A-Z0-9-][A-Za-z0-9]*)+)\s*,\s+(?P<art>an?|the)\b(?=[^,.;]{3,80},)")
+"""동격 설명: 'GMM-LDA, a topic modeling based Bayesian model, …'. 대문자·숫자가 섞인 이름만 대상으로 해서
+'Finally, a …' 같은 부사 오탐을 막는다. 관사부터 다음 쉼표까지가 설명이다."""
+
+DEFINITION_RULE = Rule(
+    "DEFINITION", "definition", "용어 설명·예시",
+    DEFINITION_CUE,
+    "앞에 나온 용어의 뜻을 풀거나 예를 드는 신호어. 신호어 뒤 설명 구간에는 점선 밑줄을 긋는다. 대문자 이름 뒤 동격('X, a …,')도 설명으로 본다.",
+    reason="앞 용어의 뜻이나 예시를 알려 주는 부분이에요. 처음 보는 용어라면 여기부터 읽으세요",
+    examples=("refers to", ", which aims to", "such as", "(i.e., …)", "GMM-LDA, a topic model,"),
+    misses=("신호어 없는 설명", "소문자 용어의 동격"),
+    toggleable=True,
+)
+
+EVIDENCE_NUMBER = re.compile(
+    r"\b(?:accuracy|f1(?:-score)?|bleu|rouge(?:-\w+)?|precision|recall|auc|error rate|perplexity)\b"
+    r"(?:\s+(?:of|=|is|was|score of))?\s*\d+(?:\.\d+)?\s?%?"
+    r"|(?<![\w.])\d+(?:\.\d+)?\s?(?:%|percent\b|x\b|times\b|points?\b|-fold\b)",
+    re.I,
+)
+NUMBER_RULE = Rule(
+    "NUMBER", "number", "수치 근거",
+    EVIDENCE_NUMBER,
+    "결과를 뒷받침하는 수치: 백분율, 배수, 점수, '지표 + 숫자'(accuracy of 74%).",
+    reason="주장을 뒷받침하는 수치예요. 무엇과 비교한 값인지 함께 확인하세요",
+    examples=("by 8.4%", "accuracy of 74%", "2x faster", "F1-score of 77.63%"),
+    misses=("단위 없는 숫자(데이터 개수 등)",),
+    toggleable=True,
+)
+
+TOKEN_RULES = (ABBR_RULE, HEDGE_RULE, HEDGE_EXCLUDE_RULE, CONFIDENT_RULE, REFERENCE_RULE, DEFINITION_RULE, NUMBER_RULE)
 
 # ====================================================================== 3줄 뼈대 (P0-2)
 
@@ -291,7 +337,7 @@ KO_TRAIL_PARTICLE = re.compile(r"(?<=[가-힣])(?:을|를|에서|으로)$")
 KO_WORD_REST = re.compile(r"[가-힣A-Za-z0-9%]*")
 """DeepL이 밑줄 태그를 단어 중간('향상시키|는')에서 닫으면 단어 끝까지 늘린다."""
 
-KO_NOUN_PARTICLES = frozenset({"가", "이", "을", "를", "의", "에", "와", "과", "도", "로", "만", "에서", "으로", "에게"})
+KO_NOUN_PARTICLES = frozenset({"가", "이", "을", "를", "의", "에", "와", "과", "도", "로", "만", "에서", "으로", "에게", "인", "이며", "이자"})
 """남은 조각이 이 조사들이면 늘리지 않는다('평가|가'는 '평가'에서 멈춤)."""
 
 TOGGLEABLE_RULES = tuple(r for r in (*TOKEN_RULES, POSITION_FALLBACK_RULE) if r.toggleable)

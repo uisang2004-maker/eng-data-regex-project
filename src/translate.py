@@ -54,8 +54,9 @@ class TranslationResult:
     protected: list[list[str]] = field(default_factory=list)   # 문장별 보호 토큰
     # 문장별 한국어 형광펜: (시작, 끝, 범주, 대응하는 영어 표현). DeepL이 옮긴 태그 위치에서 복원한다.
     ko_marks: list[list[tuple[int, int, str, str]]] = field(default_factory=list)
-    # 문장별 한국어 밑줄: (시작, 끝, 카드 종류) 또는 None. 영어 밑줄을 <u>로 보내 DeepL이 옮긴 위치에서 복원한다.
-    ko_underlines: list[tuple[int, int, str] | None] = field(default_factory=list)
+    # 문장별 한국어 밑줄 목록: [(시작, 끝, 종류)]. 종류는 problem/method/result(핵심 내용) 또는 def(용어 설명).
+    # 영어 밑줄을 <u>로 보내 DeepL이 옮긴 위치에서 복원한다.
+    ko_underlines: list[list[tuple[int, int, str]]] = field(default_factory=list)
 
 
 Mark = tuple[int, int, str]   # 문장 안의 (시작, 끝, 범주)
@@ -78,13 +79,14 @@ def _protect_spans(sentence: str, acronyms: dict[str, str | None] | None) -> lis
 
 
 def to_xml(sentence: str, acronyms: dict[str, str | None] | None = None, masked: bool = True,
-           marks: list[Mark] | None = None, underline: Underline | None = None) -> str:
+           marks: list[Mark] | None = None, underline: Underline | list[Underline] | None = None) -> str:
     """번역에 보낼 XML을 만든다.
 
     - masked면 보호 구간을 <x>로 감싼다(DeepL이 번역하지 않음).
     - marks(영어 쪽 형광펜)는 <m c="범주" i="번호">로 감싼다. DeepL은 이 태그를 대응하는 번역어 쪽으로 옮긴다.
       보호 구간과 겹치는 표시(약어·참조)는 <x>에 c·i 속성으로 붙인다.
-    - underline(핵심 내용 밑줄)은 <u c="u-종류" i="0">로 바깥에서 감싼다. 안쪽 태그를 자르지 않도록 경계를 넓힌다.
+    - underline(핵심 내용·용어 설명 밑줄, 하나 또는 목록)은 <u c="u-종류" i="번호">로 바깥에서 감싼다.
+      안쪽 태그를 자르지 않도록 경계를 넓히고, 밑줄끼리 겹치면 앞의 것만 남긴다.
     """
     spans: list[list] = [[a, b, "x", None, None] for a, b in (_protect_spans(sentence, acronyms) if masked else [])]
     for i, (a, b, cat) in enumerate(marks or []):
@@ -95,26 +97,32 @@ def to_xml(sentence: str, acronyms: dict[str, str | None] | None = None, masked:
         else:
             spans.append([a, b, "m", cat, i])
     spans.sort()
-    ua = ub = None
-    if underline and underline[1] > underline[0]:
-        ua, ub = underline[0], underline[1]
+    wraps: list[list] = []
+    items = [underline] if underline and isinstance(underline[0], int) else list(underline or [])
+    for k, (ua, ub, kind) in enumerate(items):
+        if ub <= ua:
+            continue
         for sp in spans:   # 밑줄 경계가 다른 태그 안에 떨어지면 그 태그 바깥으로 넓혀 태그가 꼬이지 않게 한다
             if sp[0] < ua < sp[1]:
                 ua = sp[0]
             if sp[0] < ub < sp[1]:
                 ub = sp[1]
-    cuts = sorted({0, len(sentence), *(e for sp in spans for e in sp[:2]), *((ua, ub) if ua is not None else ())})
+        if all(ub <= w[0] or ua >= w[1] for w in wraps):
+            wraps.append([ua, ub, kind, k])
+    opens = {w[0]: w for w in wraps}
+    closes = {w[1] for w in wraps}
+    cuts = sorted({0, len(sentence), *(e for sp in spans for e in sp[:2]), *(e for w in wraps for e in w[:2])})
     out = []
     for x, y in zip(cuts, cuts[1:]):
-        if x == ua:
-            out.append(f'<u c="u-{underline[2]}" i="0">')
+        if x in opens:
+            out.append(f'<u c="u-{opens[x][2]}" i="{opens[x][3]}">')
         sp = next((sp for sp in spans if sp[0] == x and sp[1] == y), None)
         if sp:
             attrs = f' c="{sp[3]}" i="{sp[4]}"' if sp[3] else ""
             out.append(f"<{sp[2]}{attrs}>{escape(sentence[x:y])}</{sp[2]}>")
         else:
             out.append(escape(sentence[x:y]))
-        if y == ub:
+        if y in closes:
             out.append("</u>")
     return "".join(out)
 
@@ -132,21 +140,31 @@ def protected_tokens(xml_text: str) -> list[str]:
     return [unescape(P.X_TAG.sub("", t)) for t in re.findall(r"<x\b[^>]*>(.*?)</x>", xml_text)]
 
 
-def ko_underline_from_xml(ko_xml: str, plain: str) -> tuple[int, int, str] | None:
-    """번역 결과의 <u> 위치를 한국어 문장 위 구간으로 바꾼다.
-
-    DeepL이 태그를 둘로 나누는 경우(마침표에만 붙은 조각)가 있어 글자가 가장 많은 조각을 고른다.
-    밑줄 끝의 조사(을·를·은·는·에서·으로)는 밑줄 밖으로 뺀다. 찾지 못하면 None — 억지로 맞추지 않는다.
-    """
-    best = None
+def ko_underlines_from_xml(ko_xml: str, plain: str) -> list[tuple[int, int, str]]:
+    """번역 결과의 <u> 위치들을 한국어 문장 위 구간 목록으로 바꾼다(밑줄 번호마다 하나)."""
+    best: dict[str, tuple[int, str, str]] = {}
     for m in P.UL_TAG.finditer(ko_xml):
         phrase = unescape(P.X_TAG.sub("", m.group("body"))).strip()
         letters = len(re.findall(r"[가-힣A-Za-z0-9]", phrase))
-        if letters and (best is None or letters > best[0]):
-            best = (letters, phrase, m.group("c").removeprefix("u-"))
-    if not best:
-        return None
-    _, phrase, kind = best
+        if letters and (m.group("i") not in best or letters > best[m.group("i")][0]):
+            best[m.group("i")] = (letters, phrase, m.group("c").removeprefix("u-"))
+    out = []
+    for _, phrase, kind in best.values():
+        sp = _locate_ko(phrase, kind, plain)
+        if sp and all(sp[1] <= o[0] or sp[0] >= o[1] for o in out):
+            out.append(sp)
+    return sorted(out)
+
+
+def ko_underline_from_xml(ko_xml: str, plain: str) -> tuple[int, int, str] | None:
+    """첫 번째 밑줄만 돌려준다(밑줄이 하나인 경우의 편의 함수)."""
+    found = ko_underlines_from_xml(ko_xml, plain)
+    return found[0] if found else None
+
+
+def _locate_ko(phrase: str, kind: str, plain: str) -> tuple[int, int, str] | None:
+    """DeepL이 태그를 둘로 나누면(마침표에만 붙은 조각) 글자가 가장 많은 조각을 쓴다.
+    단어 중간에서 끝나면 단어 끝까지 늘리고, 끝의 을·를·에서·으로는 밑줄 밖으로 뺀다. 못 찾으면 None."""
     at = plain.find(phrase)
     if at < 0:
         return None
@@ -265,7 +283,7 @@ def translate(sentences: list[str], acronyms: dict[str, str | None] | None = Non
     def finish(raw: list[str]) -> tuple[list[str], list, list]:
         ko = [fix_korean(unprotect(r)) for r in raw]
         return (ko, [ko_marks_from_xml(r, k, e) for r, k, e in zip(raw, ko, en_phrases)],
-                [ko_underline_from_xml(r, k) if ul else None for r, k, ul in zip(raw, ko, underlines)])
+                [ko_underlines_from_xml(r, k) if ul else [] for r, k, ul in zip(raw, ko, underlines)])
 
     if key in cache and cache[key].get("raw"):
         # DeepL 원본 응답을 저장해 두었으면 후처리 규칙이 바뀌어도 다시 호출하지 않고 다시 계산한다
@@ -278,7 +296,7 @@ def translate(sentences: list[str], acronyms: dict[str, str | None] | None = Non
         return TranslationResult(ko=hit.get("ko"), mode=hit["mode"], paragraph=hit.get("paragraph"), masked=masked,
                                  cached=True, protected=tokens,
                                  ko_marks=[[tuple(x) for x in row] for row in hit.get("ko_marks", [])],
-                                 ko_underlines=[tuple(u) if u else None for u in hit.get("ko_underlines", [])])
+                                 ko_underlines=[_norm_ul(u) for u in hit.get("ko_underlines", [])])
 
     api_key = api_key or load_api_key()
     if not api_key:
@@ -311,6 +329,15 @@ def translate(sentences: list[str], acronyms: dict[str, str | None] | None = Non
         _save_cache(cache)
     return TranslationResult(ko=ko, mode=mode, paragraph=paragraph, masked=masked, protected=tokens, ko_marks=ko_marks,
                              ko_underlines=ko_underlines)
+
+
+def _norm_ul(u) -> list[tuple[int, int, str]]:
+    """예전 캐시(문장마다 밑줄 하나 또는 None)를 목록 형식으로 맞춘다."""
+    if not u:
+        return []
+    if isinstance(u[0], int):
+        return [tuple(u)]
+    return [tuple(x) for x in u]
 
 
 def preserved_ratio(result: TranslationResult) -> tuple[int, int]:

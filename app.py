@@ -35,8 +35,12 @@ KIND_META = {
     "result": ("결과 · Result", "violet"),
 }
 BASIS_TEXT = {"signal": "신호 문구로 찾음", "position": "위치로 추정", "none": "찾지 못함"}
-MARK_LABEL = {"abbr": "약어", "abbr-missing": "약어(정의 없음)", "hedge": "추측·가능성", "confident": "확신", "reference": "참조"}
-CAT_RULE = {"abbr": "ABBR", "abbr-missing": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE"}
+MARK_LABEL = {"abbr": "약어", "abbr-missing": "약어(정의 없음)", "hedge": "추측·가능성", "confident": "확신", "reference": "참조",
+              "definition": "용어 설명·예시", "number": "수치 근거"}
+CAT_RULE = {"abbr": "ABBR", "abbr-missing": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE",
+            "definition": "DEFINITION", "number": "NUMBER"}
+UL_TITLE = {"problem": "핵심 내용(밑줄) · 무엇이 어려운가", "method": "핵심 내용(밑줄) · 무엇을 만들었나",
+            "result": "핵심 내용(밑줄) · 무엇을 발견했나", "def": "용어 설명(점선 밑줄)"}
 
 ICON = {
     "doc": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>',
@@ -139,6 +143,8 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-sk-ko { margin-top:8px; padding-top:8px; border-top:1px dashed #e3e9f0; font-size:13.5px; color:#4a5e73; line-height:1.65; }
 .pp-u { text-decoration-line: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; text-decoration-color:#6c9dbb; }
 .pp-u.method { text-decoration-color:#3a9c92; } .pp-u.result { text-decoration-color:#8b79b5; }
+.pp-u.def { text-decoration-style: dotted; text-decoration-thickness: 2px; text-decoration-color:#c45a83; }
+.pp-u .pp-u.def { text-decoration: none; color:#a2385f; }   /* 핵심 내용 밑줄 안의 용어 설명은 글자색으로만 */
 .pp-u .pp-m, .pp-u [class^="pp-sig-"] { background: transparent !important; border-bottom: 0 !important; padding: 0; }
 .pp-reason { display:flex; align-items:flex-start; gap:6px; margin-top:10px; color:#5c7084; font-size:12px; line-height:1.5; }
 .pp-limit { color:#60758a; font-size:12px; margin-top:2px; }
@@ -148,6 +154,7 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-chip { height:28px; padding:0 10px; border-radius:7px; display:inline-flex; align-items:center; font-size:12px; font-weight:750; }
 .pp-chip.blue { color:#25618b; background:var(--blue-soft); } .pp-chip.amber { color:#986314; background:var(--amber-soft); }
 .pp-chip.teal { color:#1f7b73; background:var(--teal-soft); } .pp-chip.violet { color:#73539d; background:var(--violet-soft); }
+.pp-chip.rose { color:#a2385f; background:#fcedf3; } .pp-chip.indigo { color:#3c4ea0; background:#eef0fb; }
 
 /* 원문·번역 */
 .pp-reader-head { padding:12px 16px; border-bottom:1px solid #edf0f4; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -168,6 +175,8 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-m.hedge { color:#956314; background:#fff4dd; border-bottom:1px solid #d7ac57; }
 .pp-m.confident { color:#1c756d; background:#e8f5f1; }
 .pp-m.reference { color:#73539d; background:#f0ebf8; }
+.pp-m.definition { color:#a2385f; background:#fcedf3; border-bottom:1px solid #e3a3bc; }
+.pp-m.number { color:#3c4ea0; background:#eef0fb; }
 .pp-m:hover::after, .pp-m:focus::after { content: attr(data-tip); position:absolute; left:0; top:calc(100% + 6px); z-index:20;
   background:#17293f; color:#fff; font-size:12px; font-weight:500; line-height:1.45; padding:7px 9px; border-radius:7px;
   width:max-content; max-width:300px; white-space:normal; box-shadow:0 6px 16px rgba(0,0,0,.18); }
@@ -270,27 +279,42 @@ def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
+def as_wrappers(u) -> list:
+    """밑줄 값(하나, 목록, None)을 목록으로 맞춘다."""
+    if not u:
+        return []
+    return [u] if isinstance(u[0], int) else list(u)
+
+
 def render_layers(text: str, spans, underline=None) -> str:
-    """형광펜(spans)과 핵심 내용 밑줄(underline)을 함께 그린다.
+    """형광펜(spans)과 밑줄(underline: 핵심 내용·용어 설명)을 함께 그린다.
 
     spans: [(시작, 끝, CSS 클래스, 툴팁)] — 서로 겹치지 않는다.
-    underline: (시작, 끝, 카드 종류) 또는 None. 형광펜을 자르지 않도록 경계를 넓힌다.
-    밑줄 안의 형광펜은 CSS에서 배경을 빼고 글자색만 남긴다(겹침 소음 줄이기).
+    underline: (시작, 끝, 종류[, 툴팁]) 하나 또는 목록. 앞의 것이 우선이고 겹치는 뒤의 것은 버린다.
+    형광펜을 자르지 않도록 밑줄 경계를 넓힌다. 밑줄 안의 형광펜은 CSS에서 배경을 빼고 글자색만 남긴다.
     """
     spans = sorted(sp for sp in spans if 0 <= sp[0] < sp[1] <= len(text))
-    ua = ub = None
-    if underline and 0 <= underline[0] < underline[1] <= len(text):
-        ua, ub = underline[0], underline[1]
+    wraps = []
+    for w in as_wrappers(underline):
+        ua, ub, kind = w[0], w[1], w[2]
+        if not (0 <= ua < ub <= len(text)):
+            continue
         for a, b, *_ in spans:
             if a < ua < b:
                 ua = a
             if a < ub < b:
                 ub = b
-    cuts = sorted({0, len(text), *(e for sp in spans for e in sp[:2]), *((ua, ub) if ua is not None else ())})
+        # 겹치지 않으면 그대로, 용어 설명이 핵심 내용 밑줄 안에 통째로 들어가면 안쪽에 겹쳐 그린다(교차하면 버림)
+        inside = [o for o in wraps if o[0] <= ua and ub <= o[1]]
+        crossing = [o for o in wraps if not (ub <= o[0] or ua >= o[1]) and o not in inside]
+        if crossing or (inside and kind != "def"):
+            continue
+        wraps.append((ua, ub, kind, w[3] if len(w) > 3 else UL_TITLE.get(kind, "")))
+    cuts = sorted({0, len(text), *(e for sp in spans for e in sp[:2]), *(e for w in wraps for e in w[:2])})
     out = []
     for x, y in zip(cuts, cuts[1:]):
-        if x == ua:
-            out.append(f'<span class="pp-u {underline[2]}" title="핵심 내용(밑줄) · 신호 문구가 가리키는 내용">')
+        for w in sorted((w for w in wraps if w[0] == x), key=lambda w: -(w[1] - w[0])):   # 바깥 밑줄부터 연다
+            out.append(f'<span class="pp-u {w[2]}" title="{esc(w[3])}">')
         sp = next((sp for sp in spans if sp[0] == x and sp[1] == y), None)
         if sp:
             tip = esc(sp[3])
@@ -298,8 +322,7 @@ def render_layers(text: str, spans, underline=None) -> str:
                        f'{esc(text[x:y])}</span>')
         else:
             out.append(esc(text[x:y]))
-        if y == ub:
-            out.append("</span>")
+        out.extend("</span>" for w in wraps if w[1] == y)
     return "".join(out)
 
 
@@ -313,9 +336,17 @@ def render_ko(ko: str, ko_marks, active, underline=None) -> str:
     return render_layers(ko, spans, underline)
 
 
-def card_underlines(a) -> dict[int, tuple[int, int, str]]:
-    """문장 번호 → 그 문장의 핵심 내용 밑줄(문장 안 위치, 카드 종류). 신호 문구로 찾은 카드만."""
-    return {c.sentence_idx: (*c.underline, c.kind) for c in a.skeleton if c.sentence_idx is not None and c.underline}
+def card_underlines(a) -> dict[int, list]:
+    """문장 번호 → 그 문장의 밑줄 목록(문장 안 위치). 핵심 내용(신호 문구로 찾은 카드)이 먼저, 용어 설명이 뒤."""
+    out: dict[int, list] = {}
+    for c in a.skeleton:
+        if c.sentence_idx is not None and c.underline:
+            out.setdefault(c.sentence_idx, []).append((*c.underline, c.kind))
+    for x, y, tip in a.explanations:
+        s = next((s for s in a.sentences if s.start <= x < s.end), None)
+        if s:
+            out.setdefault(s.idx, []).append((x - s.start, min(y, s.end) - s.start, "def", tip))
+    return out
 
 
 def translation_layers(raw_text: str):
@@ -324,7 +355,7 @@ def translation_layers(raw_text: str):
     uls = card_underlines(full)
     marks = [[(m.start - s.start, m.end - s.start, m.category) for m in full.marks if s.start <= m.start and m.end <= s.end]
              for s in full.sentences]
-    return marks, [uls.get(s.idx) for s in full.sentences]
+    return marks, [[w[:3] for w in uls.get(s.idx, [])] for s in full.sentences]
 
 
 def render_marked(text: str, start: int, end: int, marks, underline=None) -> str:
@@ -346,7 +377,7 @@ def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
     else:
         s = a.sentences[card.sentence_idx].text
         spans = [(*card.signal, f"pp-sig-{color}", f"신호 문구 · {card.reason}")] if card.signal else []
-        ul = (*card.underline, card.kind) if card.underline else None
+        ul = card_underlines(a).get(card.sentence_idx, [])
         body = (f'<div class="pp-sk-text"><span class="pp-sk-no">문장 {card.sentence_idx + 1}</span>'
                 f'{render_layers(s, spans, ul)}</div>')
         if ko:
@@ -512,7 +543,7 @@ def translation_panel(a) -> None:
                 if off and off.ko is not None and i < len(off.ko) and off.ko[i] != ko:
                     extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
                 rows.append(f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div>'
-                            f'<div><div class="pp-text">{render_ko(ko, marks_ko[i] if i < len(marks_ko) else [], a.active_rules, uls_ko[i] if i < len(uls_ko) else None)}</div>{extra}</div></div>')
+                            f'<div><div class="pp-text">{render_ko(ko, marks_ko[i] if i < len(marks_ko) else [], a.active_rules, as_wrappers(uls_ko[i]) if i < len(uls_ko) else None)}</div>{extra}</div></div>')
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)
@@ -550,7 +581,7 @@ def reading_page() -> None:
     for col, card in zip(cols, a.skeleton):
         i = card.sentence_idx
         ko = tr.ko[i] if tr and tr.ko and i is not None and i < len(tr.ko) else None
-        ko_ul = tr.ko_underlines[i] if ko and tr.ko_underlines and i < len(tr.ko_underlines) else None
+        ko_ul = as_wrappers(tr.ko_underlines[i]) if ko and tr.ko_underlines and i < len(tr.ko_underlines) else None
         col.markdown(skeleton_card(card, a, ko, ko_ul), unsafe_allow_html=True)
     if a.limit_idx:
         st.markdown(f'<div class="pp-limit">한계·향후 과제 문장: {", ".join("문장 " + str(i + 1) for i in a.limit_idx)}</div>',
@@ -562,7 +593,9 @@ def reading_page() -> None:
     t2.markdown(f'<div class="pp-chips"><span class="pp-chip blue">약어 {c["abbr"]}</span>'
                 f'<span class="pp-chip amber">추측·가능성 {c["hedge"]}</span>'
                 f'<span class="pp-chip teal">확신 {c["confident"]}</span>'
-                f'<span class="pp-chip violet">참조 {c["reference"]}</span></div>', unsafe_allow_html=True)
+                f'<span class="pp-chip violet">참조 {c["reference"]}</span>'
+                f'<span class="pp-chip rose">용어 설명 {c["definition"]}</span>'
+                f'<span class="pp-chip indigo">수치 {c["number"]}</span></div>', unsafe_allow_html=True)
     with t3:
         st.toggle("읽기 전용 단계 보기", key="show_steps")
     if ss.show_steps:

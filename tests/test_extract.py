@@ -100,7 +100,7 @@ def test_rule_off_removes_marks():
 
 
 def test_demo_counts():
-    assert analyze(DEMO).counts == {"abbr": 1, "hedge": 2, "confident": 2, "reference": 1}
+    assert analyze(DEMO).counts == {"abbr": 1, "hedge": 2, "confident": 2, "reference": 1, "definition": 0, "number": 1}
 
 
 # ---------------------------------------------------------------- 3줄 뼈대 (P0-2)
@@ -213,3 +213,39 @@ def test_samples_underline_length():
                 s = a.sentences[c.sentence_idx].text
                 lengths.append(len(s[c.underline[0]:c.underline[1]].split()))
     assert lengths and max(lengths) <= P.UNDERLINE_MAX_WORDS
+
+
+# ---------------------------------------------------------------- 용어 설명·수치 근거
+
+def expl(text):
+    a = analyze(text)
+    return [a.text[x:y] for x, y, _ in a.explanations]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Hierarchical text classification, which aims to classify text documents into a given hierarchy, is important.",
+     ["classify text documents into a given hierarchy"]),
+    ("We evaluate methods such as deep neural networks for natural language inference (NLI). It works.",
+     ["deep neural networks for natural language inference (NLI)"]),
+    ("We propose GMM-LDA, a topic modeling based Bayesian unsupervised model, to analyze text.",
+     ["a topic modeling based Bayesian unsupervised model"]),
+    ("A pattern refers to a formatted combination of several words. Next.", ["a formatted combination of several words"]),
+    ("The model is faster (i.e., it uses less memory) than before.", ["it uses less memory"]),
+])
+def test_explanation_spans(text, expected):
+    assert expl(text) == expected
+
+
+def test_adverb_is_not_appositive_term():
+    assert expl("Finally, a visual-semantic encoder is exploited to refine the features, and it helps.") == []
+
+
+def test_definition_and_number_marks():
+    a = analyze("Tasks such as parsing reach an accuracy of 74% and run 2x faster.")
+    got = [(a.text[m.start:m.end], m.category) for m in a.marks if m.category in ("definition", "number")]
+    assert got == [("such as", "definition"), ("accuracy of 74%", "number"), ("2x", "number")]
+
+
+def test_definition_toggle_removes_explanations():
+    a = analyze("Tasks such as parsing are hard.", P.DEFAULT_ACTIVE_RULES - {"DEFINITION"})
+    assert a.explanations == [] and a.counts["definition"] == 0
