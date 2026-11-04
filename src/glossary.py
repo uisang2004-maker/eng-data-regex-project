@@ -224,3 +224,8 @@ def to_csv(rows: list[Entry]) -> bytes:
         w.writerow([e.term, ", ".join(KIND_LABEL[k] for k in e.kinds), e.level, e.count,
                     e.first_sentence or "", e.explanation, e.korean, e.ai_meaning])
     return ("﻿" + buf.getvalue()).encode("utf-8")
+
+
+def term_key(term: str) -> str:
+    """단어표·툴팁에서 같은 용어로 볼 키(소문자, 복수형 정리): ``Rerankers`` → ``reranker``."""
+    return _key(term)

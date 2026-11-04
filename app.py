@@ -6,6 +6,7 @@
 
 import hashlib
 import html
+import re
 
 import streamlit as st
 
@@ -26,6 +27,7 @@ MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
 M_PDF, M_ARXIV, M_PASTE = MODES
 MAX_PASTE = 20000
 MAX_PDF_MB = 20
+TIMES = re.compile(r"(\d+)번")      # 반복 용어 표시 설명에서 등장 횟수
 READ_MODES = ("side", "pair", "en", "ko")      # 읽기 모드: 한영 나란히 / 문장마다 한영 / 원문만 / 한국어만
 READ_MODE_LABEL = {"side": "한영 나란히", "pair": "문장마다 한영", "en": "영어 원문만", "ko": "한국어만"}
 
@@ -519,9 +521,21 @@ def translation_layers(raw_text: str):
 
 def render_marked(text: str, start: int, end: int, marks, underline=None) -> str:
     """원문 문장(text[start:end]) 렌더링. underline은 문장 안 위치."""
+    tips = st.session_state.get("term_tips", {}).get(text_key(text), {})
     spans = [(max(m.start, start) - start, min(m.end, end) - start, f"pp-m {m.category}",
-              f"{MARK_LABEL[m.category]} · {m.tip}") for m in marks if m.end > start and m.start < end]
+              term_tip(text[m.start:m.end], m.tip, tips) if m.category == "term" else f"{MARK_LABEL[m.category]} · {m.tip}")
+             for m in marks if m.end > start and m.start < end]
     return render_layers(text[start:end], spans, underline)
+
+
+def term_tip(term: str, tip: str, tips: dict[str, str]) -> str:
+    """반복 용어 툴팁: 뜻을 알면 뜻을 먼저, 모르면 뜻을 받는 방법을 알려 준다."""
+    n = TIMES.search(tip)
+    times = f" · 이 글에 {n.group(1)}번" if n else ""
+    mean = tips.get(G.term_key(term))
+    if mean:
+        return f"{term}: {mean}{times}"
+    return f"{term}{times} · 뜻은 '번역하기'나 단어표의 'AI로 뜻 풀이 받기'를 누르면 여기에 떠요"
 
 
 def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
@@ -815,13 +829,36 @@ class CountingCaller:
         return out
 
 
-def ai_glossary(a, rows) -> None:
-    """단어표의 AI 풀이: 사용 제한을 확인하고 Claude에 한 번 보낸다(결과는 이 화면에만 저장)."""
+def frequent_term_items(a, skip: set[str]) -> list[tuple[str, str, str]]:
+    """반복 용어(밑줄 친 자주 나오는 단어) 중 단어표에 없는 것도 뜻 풀이 요청에 넣는다."""
+    out, seen = [], set(skip)
+    for m in a.marks:
+        if m.category != "term":
+            continue
+        term = a.text[m.start:m.end]
+        k = G.term_key(term)
+        if k in seen:
+            continue
+        seen.add(k)
+        sent = next((s.text for s in a.sentences if s.start <= m.start < s.end), "")
+        out.append((term, sent, ""))
+    return out
+
+
+def fetch_meanings(a, rows) -> None:
+    """AI 풀이: 단어표의 단어 + 반복 용어의 뜻을 Claude에 한 번 보낸다(결과는 이 화면에만 저장).
+    단어표 칸과 원문 반복 용어 밑줄의 툴팁에 함께 쓴다."""
     ss = st.session_state
     ss.ai_gloss_error = None
-    items = G.ai_items(a, rows)[:MAX_TERMS]
+    # 원문에 밑줄로 보이는 반복 용어를 먼저 넣고(40개 상한에 밀리지 않게), 단어표 단어를 이어 붙인다
+    freq = frequent_term_items(a, set())
+    seen = {G.term_key(t) for t, _, _ in freq}
+    items = (freq + [it for it in G.ai_items(a, rows) if G.term_key(it[0]) not in seen])[:MAX_TERMS]
+    if not items:
+        return
     chars = sum(len(t) + len(s) + len(k) for t, s, k in items)
-    reason = usage.check(chars, ss.deepl_calls, engine="claude")
+    # 단어 40개 × 문장 300자까지라 번역의 '한 번 4,000자' 한도와 성격이 달라 화면·하루 한도만 본다
+    reason = usage.check(chars, ss.deepl_calls, engine="claude", per_request=False)
     if reason:
         ss.ai_gloss_error = reason
         return
@@ -834,7 +871,20 @@ def ai_glossary(a, rows) -> None:
     usage.record(chars)
     ss.deepl_calls += 1
     ss.ai_gloss[text_key(a.text)] = got
-    st.rerun()
+
+
+def term_meanings(a, tr) -> dict[str, str]:
+    """반복 용어 툴팁에 쓸 뜻: AI 풀이 → 원문에서 찾은 풀네임·설명 → 번역기의 한국어 대응어 순서로."""
+    ai = st.session_state.ai_gloss.get(text_key(a.text), {})
+    out = {}
+    for e in G.build(a, G.korean_marks(tr)):
+        explained = e.explanation if e.explanation and e.explanation != "이 글에서 정의를 찾지 못함" else ""
+        mean = ai.get(e.term) or explained or (f"한국어로 '{e.korean}'" if e.korean else "")
+        if mean:
+            out[G.term_key(e.term)] = mean
+    for term, mean in ai.items():
+        out.setdefault(G.term_key(term), mean)
+    return out
 
 
 def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
@@ -957,6 +1007,9 @@ def translation_panel(a, rows_on: bool = True) -> None:
                 with st.spinner("번역하는 중…"):
                     ss.translations[(tkey, True)] = run_translate(
                         sents, a, True, file_cache, **dict(zip(("marks", "underlines"), translation_layers(ss.input_text))))
+                # Claude로 번역했으면 같은 김에 단어 뜻도 받아 둔다(반복 용어 툴팁·단어표). 이미 Claude로 보내는 글이라 안내 범위 안
+                if engine()[0] == "claude" and tkey not in ss.ai_gloss and ss.translations[(tkey, True)].ko is not None:
+                    fetch_meanings(a, G.build(a))
                 st.rerun()
             return
 
@@ -1029,6 +1082,7 @@ def reading_page() -> None:
         paper_overview(ss.paper)
 
     a = analyze(ss.input_text, frozenset(ss.active_rules))
+    ss.term_tips = {text_key(a.text): term_meanings(a, ss.translations.get((text_key(a.text), True)))}
 
     where = f" · {ss.source['section']}" if ss.source["kind"] == "pdf" else ""
     st.markdown(sec_head("01", f"먼저 읽을 3줄 뼈대{where}", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
@@ -1101,7 +1155,8 @@ def reading_page() -> None:
                  disabled=not rows or not claude_ok or bool(meanings),
                  help=("단어 선정은 정규식, 뜻 풀이만 Claude Haiku가 써요(참고용). 단어와 처음 나온 문장이 Claude로 전송돼요."
                        if claude_ok else "Claude API 키가 있을 때만 쓸 수 있어요.")):
-        ai_glossary(a, rows)
+        fetch_meanings(a, rows)
+        st.rerun()
     g3.download_button("단어표 내려받기(CSV)", G.to_csv(rows), file_name="paperpath_glossary.csv", mime="text/csv",
                        key="glossary_csv", disabled=not rows, use_container_width=True)
     if ss.get("ai_gloss_error"):

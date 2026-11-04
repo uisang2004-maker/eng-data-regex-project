@@ -25,3 +25,10 @@ def test_new_day_resets(tmp_path):
     path = tmp_path / "u.json"
     path.write_text('{"date": "2000-01-01", "chars": 999999}', encoding="utf-8")
     assert usage.used_today(path) == 0 and usage.check(100, 0, path) is None
+
+
+def test_meaning_requests_skip_per_request_limit(tmp_path):
+    path = tmp_path / "u.json"
+    assert usage.check(10_000, 0, path, engine="claude") is not None
+    assert usage.check(10_000, 0, path, engine="claude", per_request=False) is None
+    assert "번까지" in usage.check(10_000, 60, path, engine="claude", per_request=False)

@@ -217,3 +217,18 @@ def test_reading_modes(at):
     assert "영어 원문" in en and 'class="pp-sent pp-ko"' not in en and "pp-pair-ko" not in en
     ko_only = view("ko")
     assert 'class="pp-sent pp-ko"' in ko_only and "영어 원문</span>" not in ko_only and "영어 원문 <span" not in ko_only
+
+
+def test_frequent_term_tooltip_shows_meaning(at):
+    import hashlib
+
+    text = ("The reranker scores passages. A reranker is small. We train the reranker on data. "
+            "Our reranker helps retrieval.")
+    at.session_state["input_text"] = text
+    at.run()
+    before = md_text(at)
+    assert "누르면 여기에 떠요" in before                                     # 뜻을 모르면 받는 방법 안내
+    key = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    at.session_state["ai_gloss"] = {key: {"reranker": "검색 결과 순위를 다시 매기는 모델"}}
+    at.run()
+    assert "reranker: 검색 결과 순위를 다시 매기는 모델" in md_text(at)

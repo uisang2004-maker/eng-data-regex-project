@@ -66,10 +66,12 @@ def check_batch(chunk_chars: list[int], session_calls: int, path: Path | None = 
     return None
 
 
-def check(chars: int, session_calls: int, path: Path | None = None, engine: str = "deepl") -> str | None:
-    """번역해도 되면 None, 안 되면 화면에 보여 줄 한국어 이유."""
+def check(chars: int, session_calls: int, path: Path | None = None, engine: str = "deepl",
+          per_request: bool = True) -> str | None:
+    """번역해도 되면 None, 안 되면 화면에 보여 줄 한국어 이유.
+    per_request=False는 단어 뜻 풀이처럼 한 번에 보내는 글 길이를 따로 정해 둔 요청(한 번 한도는 보지 않음)."""
     lim = LIMITS[engine]
-    if chars > lim.per_request:
+    if per_request and chars > lim.per_request:
         return (f"번역은 한 번에 {lim.per_request:,}자까지만 할 수 있어요(지금 {chars:,}자). "
                 "초록이나 단락 하나씩 넣어 주세요. 독해 표시는 그대로 볼 수 있어요.")
     if session_calls >= lim.per_session:
