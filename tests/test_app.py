@@ -132,8 +132,11 @@ def test_cards_show_korean_and_underline(at):
 
 
 def test_translation_blocked_after_session_limit(at, monkeypatch, tmp_path):
+    from src import translate as T
     from src import usage
 
+    # 가짜 DeepL 키(진짜 호출 전에 제한에서 막히는지만 본다)
+    monkeypatch.setattr(T, "load_api_key", lambda name="DEEPL_API_KEY": "fake:fx" if name == "DEEPL_API_KEY" else None)
     at.session_state["deepl_calls"] = usage.MAX_CALLS_PER_SESSION
     at.session_state["input_text"] = "A short new sentence for testing limits. Another sentence here."
     at.run()

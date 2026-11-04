@@ -79,3 +79,14 @@ def test_url_is_not_split():
 def test_spans_point_into_cleaned_text():
     t = clean("One two. Three four.").text
     assert [t[s:e] for s, e in split_sentences(t)] == ["One two.", "Three four."]
+
+
+def test_dehyphen_keeps_real_hyphen_words():
+    assert clean("can be fine-\ntuned on a task-\nspecific state-of-\nthe-art model").text == \
+        "can be fine-tuned on a task-specific state-of-the-art model"
+    assert clean("knowl-\nedge and repre-\nsentations, of-\nfering").text == "knowledge and representations, offering"
+
+
+def test_small_caps_split_joined():
+    assert clean("B idirectional E ncoder R epresentations").text == "Bidirectional Encoder Representations"
+    assert clean("Let H fit the data. A model.").text == "Let H fit the data. A model."

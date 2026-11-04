@@ -16,10 +16,13 @@ from src.analyze import load_benchmark, skeleton_stats
 from src.collect import ArxivError, fetch_abstract, load_samples
 from src import glossary as G
 from src.extract import ROLE_ORDER, analyze
+from src.pdf_text import PdfError, extract as extract_pdf
+from src.sections import split_paper
 
 PAGES = ("논문 읽기", "규칙 탐색", "검증 결과")
-MODES = ("arXiv ID", "텍스트 붙여 넣기")
+MODES = ("arXiv ID", "텍스트 붙여 넣기", "논문 PDF")
 MAX_PASTE = 20000
+MAX_PDF_MB = 20
 
 # 화면 예시용으로 직접 작성한 문단(실제 논문 아님). v03 시안과 같은 문장이다.
 DEMO_TEXT = (
@@ -250,6 +253,7 @@ def init_state() -> None:
     ss.setdefault("show_translation", True)
     ss.setdefault("input_error", None)
     ss.setdefault("deepl_calls", 0)
+    ss.setdefault("paper", None)          # PDF에서 나눈 절 목록(src.sections.Paper). 파일 자체는 저장하지 않는다
 
 
 @st.cache_resource
@@ -272,6 +276,39 @@ def load_demo() -> None:
     st.session_state.input_text = DEMO_TEXT
     st.session_state.source = {"kind": "demo"}
     st.session_state.input_error = None
+    st.session_state.paper = None
+
+
+def pick_section() -> None:
+    """절 고르기: 고른 절의 본문을 지금 읽는 글로 바꾼다(번역은 절마다 따로 남는다)."""
+    ss = st.session_state
+    i = ss.section_pick
+    if i is None:                          # 같은 칩을 다시 눌러 선택이 풀리면 지금 절을 유지
+        ss.section_pick = i = ss.source.get("section_idx", 0)
+    sec = ss.paper.sections[i]
+    ss.input_text = sec.text
+    ss.source = {**ss.source, "section": sec.title, "section_idx": i}
+
+
+def load_pdf(data: bytes, name: str) -> str | None:
+    """PDF → 절 나누기. 실패하면 화면에 보여 줄 이유를 돌려준다."""
+    ss = st.session_state
+    if len(data) > MAX_PDF_MB * 1024 * 1024:
+        return f"PDF가 너무 커요({len(data) / 1024 / 1024:.1f}MB). {MAX_PDF_MB}MB 이하만 올릴 수 있어요."
+    try:
+        pdf = extract_pdf(data)
+    except PdfError as e:
+        return str(e)
+    paper = split_paper(pdf.lines, pdf.title or name)
+    if not paper.sections:
+        return "PDF에서 본문을 찾지 못했어요."
+    paper.notes = [f"PDF {pdf.read_pages}쪽을 읽었어요" + (f"(2단 편집 {pdf.two_column_pages}쪽은 왼쪽 단 → 오른쪽 단 순서로)"
+                                                       if pdf.two_column_pages else "") + "."] + pdf.notes + paper.notes
+    ss.paper = paper
+    ss.section_pick = 0
+    ss.input_text = paper.sections[0].text
+    ss.source = {"kind": "pdf", "title": paper.title, "section": paper.sections[0].title, "section_idx": 0}
+    return None
 
 
 def seed_rule_widgets() -> None:
@@ -464,6 +501,44 @@ def glossary_table(rows) -> str:
             f'</tr></thead><tbody>{body}</tbody></table></div>')
 
 
+SIGNAL_ROLE = {"problem": "문제", "method": "방법", "result": "결과"}
+
+
+def paper_overview(paper) -> None:
+    """PDF 논문 전체 지도: 절 고르기, 절별 요약 표(정규식이 찾은 핵심 문장), 논문 전체 어려운 단어표."""
+    ss = st.session_state
+    titles = [s.title for s in paper.sections]
+    st.markdown(sec_head("00", "논문 전체 지도", f"{len(titles)}개 절 · 약 {paper.chars:,}자 · 참고문헌·부록·각주·그림/표 설명 제외"),
+                unsafe_allow_html=True)
+    st.markdown(f'<div class="pp-meta"><b>{esc(paper.title)}</b> · {esc(" ".join(paper.notes))}</div>',
+                unsafe_allow_html=True)
+    st.pills("읽을 절 고르기", list(range(len(titles))), format_func=lambda i: titles[i], key="section_pick",
+             on_change=pick_section)
+
+    analyses = [analyze(s.text) for s in paper.sections]
+    rows = []
+    for i, (sec, a) in enumerate(zip(paper.sections, analyses)):
+        found = [(SIGNAL_ROLE[c.kind], a.sentences[c.sentence_idx].text) for c in a.skeleton
+                 if c.sentence_idx is not None and c.basis == "signal"]
+        key = "<br>".join(f'<span class="pp-chip blue">{r}</span> {esc(t[:110] + ("…" if len(t) > 110 else ""))}'
+                          for r, t in found[:2]) or '<span class="pp-meta">신호 문구로 찾은 문장 없음</span>'
+        subs = esc(", ".join(sec.subheads)) or "-"
+        now = ' style="background:#eef4fb"' if i == ss.source.get("section_idx") else ""
+        rows.append(f"<tr{now}><td><b>{esc(sec.title)}</b></td><td>{len(a.sentences)}</td><td>{key}</td>"
+                    f"<td>{subs}</td></tr>")
+    st.markdown(f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-overview">'
+                f'<thead><tr><th>절</th><th>문장</th><th>신호 문구로 찾은 핵심 문장</th><th>소제목</th></tr></thead>'
+                f'<tbody>{"".join(rows)}</tbody></table></div>', unsafe_allow_html=True)
+
+    with st.expander("논문 전체 어려운 단어표"):
+        whole = analyze("\n\n".join(s.text for s in paper.sections))
+        entries = G.build(whole)
+        st.download_button("전체 단어표 내려받기(CSV)", G.to_csv(entries), file_name="paperpath_paper_glossary.csv",
+                           mime="text/csv", key="paper_glossary_csv", disabled=not entries)
+        st.markdown(glossary_table(entries), unsafe_allow_html=True)
+        st.caption("'처음 나온 곳'은 모든 절을 이어 붙였을 때의 문장 번호예요. 한국어 대응어는 절마다 번역했을 때 그 절의 단어표에 나와요.")
+
+
 def sec_head(num: str, title: str, note: str = "") -> str:
     return (f'<div class="pp-sec"><div class="pp-sec-title"><span class="pp-sec-num">{num}</span>{esc(title)}</div>'
             f'<div class="pp-sec-note">{esc(note)}</div></div>')
@@ -492,6 +567,8 @@ def source_flag() -> str:
         return "화면 예시 데이터 · 직접 작성, 실제 논문 아님"
     if src["kind"] == "arxiv":
         return f"arXiv {src['id']} · {src.get('title', '')[:40]} · 메타데이터 CC0"
+    if src["kind"] == "pdf":
+        return f"PDF · {src.get('title', '')[:36]} · {src.get('section', '')} · 파일은 저장하지 않음"
     return "붙여 넣은 텍스트 · 앱에 저장하지 않음"
 
 
@@ -503,23 +580,28 @@ def input_panel() -> None:
         c1, c2, c3, c4, c5 = st.columns([1.6, 1.75, 2.1, 1.25, 2.3], vertical_alignment="center")
         c1.markdown(f'<div class="pp-input-copy"><div class="pp-lead">{ICON["search"]}</div><div>'
                     f'<div class="pp-field-label">분석할 논문 불러오기</div>'
-                    f'<div class="pp-field-hint">arXiv ID 또는 직접 붙여 넣기</div></div></div>', unsafe_allow_html=True)
+                    f'<div class="pp-field-hint">arXiv ID · 직접 붙여 넣기 · 논문 PDF</div></div></div>', unsafe_allow_html=True)
         with c2:
             mode = st.segmented_control("입력 방식", MODES, key="input_mode", label_visibility="collapsed") or MODES[0]
         with c3:
             if mode == MODES[0]:
                 st.text_input("arXiv ID", key="arxiv_id", placeholder="arXiv ID  예: 2402.08910",
                               label_visibility="collapsed")
-            else:
+            elif mode == MODES[1]:
                 st.caption("아래 칸에 영어 초록이나 단락을 붙여 넣으세요.")
+            else:
+                st.caption("아래에 논문 PDF를 올리면 절별로 나눠 전체를 분석해요.")
         with c4:
-            clicked = st.button("초록 불러오기" if mode == MODES[0] else "분석하기", type="primary",
-                                use_container_width=True, key="load_btn")
-        c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>붙여 넣은 텍스트는 저장하지 않아요.<br>'
+            label = {MODES[0]: "초록 불러오기", MODES[1]: "분석하기", MODES[2]: "PDF 분석하기"}[mode]
+            clicked = st.button(label, type="primary", use_container_width=True, key="load_btn")
+        c5.markdown(f'<div class="pp-privacy">{ICON["shield"]}<span>올린 파일과 붙여 넣은 텍스트는 저장하지 않아요.<br>'
                     f'번역 시 {engine_name()}로 전송됨을 미리 안내합니다.</span></div>', unsafe_allow_html=True)
         if mode == MODES[1]:
             st.text_area("영어 텍스트", key="paste_text", height=150, label_visibility="collapsed",
                          placeholder="영어 논문 초록이나 단락을 붙여 넣으세요. PDF 복사 잔재(줄바꿈·쪽번호·머리말)는 자동으로 정리해요.")
+        if mode == MODES[2]:
+            st.file_uploader("논문 PDF", type=["pdf"], key="pdf_file", label_visibility="collapsed",
+                             help=f"글자를 선택할 수 있는 영어 논문 PDF({MAX_PDF_MB}MB 이하). 스캔 이미지 PDF는 읽지 못해요.")
         st.button("예시 문단으로 보기", key="demo_btn", type="tertiary", on_click=load_demo)
 
         if clicked:
@@ -530,8 +612,16 @@ def input_panel() -> None:
                         row = fetch_abstract(ss.arxiv_id)
                         ss.input_text = row["abstract"]
                         ss.source = {"kind": "arxiv", "id": row["id"], "title": row["title"]}
+                        ss.paper = None
                     except ArxivError as e:
                         ss.input_error = str(e)
+            elif mode == MODES[2]:
+                f = ss.get("pdf_file")
+                if f is None:
+                    ss.input_error = "PDF 파일을 먼저 올려 주세요."
+                else:
+                    with st.spinner("PDF에서 글자를 읽고 절을 나누는 중…"):
+                        ss.input_error = load_pdf(f.getvalue(), f.name)
             else:
                 txt = ss.paste_text.strip()
                 letters = sum(ch.isalpha() for ch in txt)
@@ -544,6 +634,9 @@ def input_panel() -> None:
                 else:
                     ss.input_text = txt
                     ss.source = {"kind": "paste"}
+                    ss.paper = None
+            if not ss.input_error:
+                st.rerun()                 # 위쪽 출처 표시까지 새 글 기준으로 다시 그린다
         if ss.input_error:
             st.error(ss.input_error)
 
@@ -591,7 +684,7 @@ def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
     """실제로 번역 API를 부르는 순간에만 사용 제한을 확인하고 센다(캐시에서 답하면 세지 않음)."""
     ss = st.session_state
     chars = sum(len(T.unprotect(t)) for t in texts)
-    reason = usage.check(chars, ss.deepl_calls)
+    reason = usage.check(chars, ss.deepl_calls, engine=engine()[0])
     if reason:
         raise T.TranslationError(reason)
     out = engine()[2](texts, key, split)
@@ -601,9 +694,10 @@ def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
 
 
 def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
+    """긴 절은 엔진의 한 번 한도 이하 묶음으로 나눠 번역한다."""
     name, key, _ = engine()
-    return T.translate(sents, a.acronyms, masked=masked, use_file_cache=file_cache, api_key=key,
-                       caller=limited_caller, engine=name, **layers)
+    return T.translate_chunked(sents, usage.LIMITS[name].per_request, acronyms=a.acronyms, masked=masked,
+                               use_file_cache=file_cache, api_key=key, caller=limited_caller, engine=name, **layers)
 
 
 def translation_panel(a) -> None:
@@ -675,8 +769,9 @@ def translation_panel(a) -> None:
             st.info(f"보호 토큰 {len(toks)}개 중 마스킹 끔에서 바뀐 것 {len(lost_off)}개"
                     f"{(' (' + ', '.join(lost_off[:5]) + ')') if lost_off else ''} · 번역이 달라진 문장 {diff}개. "
                     "차이가 작을 수 있어요(검증 결과 탭의 30편 실측 참고).")
-        st.caption(f"번역 사용: 이 화면 {ss.deepl_calls}/{usage.MAX_CALLS_PER_SESSION}회 · "
-                   f"오늘 사이트 전체 {usage.used_today():,}/{usage.DAILY_CHAR_CAP:,}자 · 한 번에 {usage.MAX_CHARS_PER_REQUEST:,}자까지")
+        lim = usage.LIMITS[engine()[0]]
+        st.caption(f"번역 사용: 이 화면 {ss.deepl_calls}/{lim.per_session}회 · "
+                   f"오늘 사이트 전체 {usage.used_today():,}/{lim.daily:,}자 · 긴 글은 {lim.per_request:,}자씩 나눠 번역")
 
 
 def reading_page() -> None:
@@ -686,10 +781,13 @@ def reading_page() -> None:
                 f'<div class="pp-desc">원문은 그대로, 핵심 문장과 읽기 신호는 한눈에.</div></div>'
                 f'<div class="pp-flag">{ICON["info"]}{esc(source_flag())}</div></div>', unsafe_allow_html=True)
     input_panel()
+    if ss.paper is not None and ss.source["kind"] == "pdf":
+        paper_overview(ss.paper)
 
     a = analyze(ss.input_text, frozenset(ss.active_rules))
 
-    st.markdown(sec_head("01", "먼저 읽을 3줄 뼈대", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
+    where = f" · {ss.source['section']}" if ss.source["kind"] == "pdf" else ""
+    st.markdown(sec_head("01", f"먼저 읽을 3줄 뼈대{where}", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
                 unsafe_allow_html=True)
     cols = st.columns(3)
     tr = ss.translations.get((text_key(a.text), True))

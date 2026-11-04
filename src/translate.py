@@ -402,6 +402,43 @@ def translate(sentences: list[str], acronyms: dict[str, str | None] | None = Non
                              ko_underlines=ko_underlines)
 
 
+def chunk_ranges(sentences: list[str], max_chars: int) -> list[tuple[int, int]]:
+    """문장을 순서대로 묶어 각 묶음의 글자 수가 max_chars를 넘지 않게 한다(한 문장이 더 길면 그 문장만 한 묶음)."""
+    out, start, size = [], 0, 0
+    for i, s in enumerate(sentences):
+        if i > start and size + len(s) + 1 > max_chars:
+            out.append((start, i))
+            start, size = i, 0
+        size += len(s) + 1
+    if start < len(sentences):
+        out.append((start, len(sentences)))
+    return out
+
+
+def translate_chunked(sentences: list[str], max_chars: int, marks=None, underlines=None, **kw) -> TranslationResult:
+    """긴 글(논문의 한 절)을 max_chars 이하 묶음으로 나눠 translate()를 여러 번 부르고 결과를 이어 붙인다."""
+    ranges = chunk_ranges(sentences, max_chars)
+    if len(ranges) <= 1:
+        return translate(sentences, marks=marks, underlines=underlines, **kw)
+    parts = [translate(sentences[a:b], marks=marks[a:b] if marks else None,
+                       underlines=underlines[a:b] if underlines else None, **kw) for a, b in ranges]
+    bad = next((p for p in parts if p.ko is None and p.paragraph is None), None)
+    if bad:                                   # 한 묶음이라도 실패하면 그 이유를 보여 준다
+        return TranslationResult(ko=None, mode="none", masked=kw.get("masked", True), error=bad.error,
+                                 protected=[t for p in parts for t in p.protected])
+    if any(p.ko is None for p in parts):      # 문장 짝이 안 맞은 묶음이 있으면 전체를 문단으로
+        text = " ".join(p.paragraph if p.ko is None else " ".join(p.ko) for p in parts)
+        return TranslationResult(ko=None, mode="paragraph", paragraph=text, masked=kw.get("masked", True),
+                                 protected=[t for p in parts for t in p.protected])
+    mode = "aligned" if all(p.mode == "aligned" for p in parts) else "per_sentence"
+
+    def cat(attr):
+        return [x for p, (a, b) in zip(parts, ranges) for x in (getattr(p, attr) or [[] for _ in range(b - a)])]
+    return TranslationResult(ko=[k for p in parts for k in p.ko], mode=mode, masked=kw.get("masked", True),
+                             cached=all(p.cached for p in parts), protected=cat("protected"),
+                             ko_marks=cat("ko_marks"), ko_underlines=cat("ko_underlines"))
+
+
 def _norm_ul(u) -> list[tuple[int, int, str]]:
     """예전 캐시(문장마다 밑줄 하나 또는 None)를 목록 형식으로 맞춘다."""
     if not u:

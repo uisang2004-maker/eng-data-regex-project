@@ -31,12 +31,34 @@ def clean(raw: str) -> CleanResult:
         kept.append(ln)
     text = "\n".join(kept)
 
-    # 3) 줄 끝 하이픈 복원 → 4) 한 줄 개행을 공백으로 → 5) 연속 공백 정리
-    text = P.DEHYPHEN.sub("", text)
+    # 3) 줄 끝 하이픈 복원(+ 작은 대문자 조각 붙이기) → 4) 한 줄 개행을 공백으로 → 5) 연속 공백 정리
+    text = P.DEHYPHEN.sub(_dehyphen, text)
+    text = P.SMALL_CAPS_SPLIT.sub(_join_small_caps, text)
     text = P.SOFT_NEWLINE.sub(" ", text)
     text = P.MULTI_SPACE.sub(" ", text)
     text = "\n\n".join(p.strip() for p in text.split("\n\n") if p.strip())
     return CleanResult(text=text.strip(), removed_lines=removed)
+
+
+def _known(word: str) -> bool:
+    from src.glossary import word_zipf      # glossary가 이 모듈을 간접적으로 불러서 함수 안에서 불러온다
+    return word_zipf(word) > 0
+
+
+LINK_WORDS = {"of", "to", "in", "on", "the", "and", "by", "for"}   # state-of-the-art, end-to-end의 가운데 낱말
+
+
+def _dehyphen(m) -> str:
+    a, b = m.group("a"), m.group("b")
+    if a.lower() in LINK_WORDS and b in LINK_WORDS | {"art", "end"}:
+        return f"{a}-{b}"                   # of-the, the-art, to-end (of+fering은 offering으로 붙인다)
+    if not _known(a + b) and len(b) >= 3 and _known(b):
+        return f"{a}-{b}"                   # 원래 하이픈 단어(fine-tuned, task-specific, state-of-the-art)
+    return a + b
+
+
+def _join_small_caps(m) -> str:
+    return m.group(0) if _known(m.group("rest")) else m.group("c") + m.group("rest")
 
 
 def _mask_for_split(text: str) -> str:

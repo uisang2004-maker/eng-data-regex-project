@@ -88,7 +88,7 @@ def test_http_errors_do_not_raise(code, word):
 
 
 def test_no_key(monkeypatch):
-    monkeypatch.setattr(T, "load_api_key", lambda: None)
+    monkeypatch.setattr(T, "load_api_key", lambda name="DEEPL_API_KEY": None)
     r = T.translate(["One."], caller=fake_ok)
     assert r.ko is None and r.error == T.NO_KEY_MESSAGE
 

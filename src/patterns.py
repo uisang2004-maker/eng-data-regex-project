@@ -31,11 +31,16 @@ SOFT_NEWLINE = re.compile(r"(?<!\n)[ \t]*\n[ \t]*(?!\n)")
 MULTI_SPACE = re.compile(r"[ \t]{2,}")
 """연속 공백 → 공백 하나."""
 
-DEHYPHEN = re.compile(r"(?<=[a-z])-[ \t]*\n[ \t]*(?=[a-z])")
+DEHYPHEN = re.compile(r"(?P<a>[A-Za-z]*[a-z])-[ \t]*\n[ \t]*(?P<b>[a-z]+)")
 """줄 끝 하이픈으로 끊긴 단어 복원: ``termi-\\nnology`` → ``terminology``.
 
-일부러 놓치는 경우: ``state-of-\\nthe-art``처럼 원래 하이픈이 있던 단어는 붙어 버린다.
+붙인 단어가 영어 단어 빈도표에 없는데 뒤 조각이 단어이면 원래 하이픈 단어로 보고 하이픈을 남긴다
+(``fine-\\ntuned`` → ``fine-tuned``, ``state-of-\\nthe-art`` → ``state-of-the-art``). 판단은 src/clean.py.
 """
+
+SMALL_CAPS_SPLIT = re.compile(r"\b(?P<c>[B-HJ-Z]) (?P<rest>[a-z]{3,})\b")
+"""PDF의 작은 대문자 글꼴이 첫 글자만 떨어뜨린 것: ``B idirectional`` → ``Bidirectional``.
+A·I는 실제 한 글자 단어라 뺐고, 뒤 조각이 단어(``H fit``)면 붙이지 않는다(src/clean.py)."""
 
 PAGE_NUMBER_LINE = re.compile(r"^[ \t]*\d{1,4}[ \t]*$", re.M)
 """숫자만 있는 줄(쪽번호) 제거."""
@@ -418,3 +423,39 @@ ARXIV_ID = re.compile(
     re.I,
 )
 """arXiv ID: 새 형식 ``2402.08910``(``v2``, ``arXiv:`` 접두 허용), 옛 형식 ``cs/0112017``."""
+
+# ====================================================================== 논문 PDF 절 나누기 (sections)
+
+SEC_NUM_HEAD = re.compile(
+    r"^(?P<num>(?P<top>\d{1,2}|[IVX]{1,5})(?P<sub>(?:\.\d{1,2}){0,2})\.?)\s+"
+    r"(?P<title>[A-Z][A-Za-z0-9\-–’' ,:&()/]{1,80})$"
+)
+"""번호가 붙은 절 제목 줄: ``1 Introduction``, ``3.2 Pre-training BERT``, ``1. Introduction``, ``II. RELATED WORK``.
+제목에는 마침표가 없어야 한다(문장·참고문헌 줄과 구별). 표의 숫자 줄과 헷갈리지 않도록 절 번호가 1, 2, 3…
+차례로 이어질 때만 받아들인다(src/sections.py)."""
+
+SEC_NAMED_HEAD = re.compile(
+    r"^(?P<title>Abstract|Introduction|Related\s+Work|Background|Conclusions?|Discussion|Limitations|"
+    r"Acknowledg(?:e)?ments?|References|Bibliography)\.?$",
+    re.I,
+)
+"""번호 없이 이름만 있는 절 제목 줄(대문자로만 쓴 ``ABSTRACT``도 허용)."""
+
+SEC_END = re.compile(r"^(?:References|Bibliography)$", re.I)
+"""여기부터는 참고문헌이라 분석하지 않는다(부록도 함께 뺀다)."""
+
+PDF_NOISE_PARA = re.compile(
+    r"^(?:[∗*†‡§¶]|\(cid:\d+\)|\d{1,2}\s+(?:https?://|www\.|[A-Z])|"    # 각주(기호, 번호+주소, 번호+문장)
+    r"(?:Figure|Fig\.|Table)\s*\d+\s*[:.|]|"                      # 그림·표 설명
+    r"\S+@\S+)"                                                    # 이메일 줄
+)
+"""본문이 아닌 문단의 첫머리: 각주, 그림·표 설명(캡션), 이메일 줄."""
+
+PDF_CID = re.compile(r"\(cid:\d+\)")
+"""PDF 글꼴에서 글자로 바꾸지 못한 기호 자리표시(예: ``(cid:63)``)."""
+
+PDF_WORDLIKE = re.compile(r"[A-Za-z]{3,}")
+"""표·수식 조각을 거르는 데 쓰는 '세 글자 이상 영어 낱말'."""
+
+SEC_TITLE_FUNCTION = re.compile(r"\b(?:the|a|an|that|this|these|we|our|is|are|was|were|in|of|to|for|with|and|by|on)\b", re.I)
+"""절 제목 후보 안의 기능어. 4개 이상이면 제목이 아니라 문장(예: 번호 각주 ``4 We note that in the literature the ...``)."""
