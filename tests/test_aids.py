@@ -22,8 +22,7 @@ def test_first_sentence_fallback_is_background():
 def test_glossary_collects_acronyms_terms_and_explained():
     rows = {e.term: e for e in G.build(analyze(TEXT))}
     assert rows["RAG"].explanation == "Retrieval-augmented generation" and rows["RAG"].kinds == ["abbr"]
-    assert rows["AccentNet"].explanation == "a small adapter" and "explained" in rows["AccentNet"].kinds
-    assert rows["AccentNet"].count == 2 and rows["AccentNet"].first_sentence == 3
+    assert "AccentNet" not in rows and "AccentNet" in G.proper_names(analyze(TEXT))   # 모델 이름은 이름 목록으로
     assert "accent" not in rows      # accents 2번 + accented(-ed 한 단어 제외) → 3번이 안 됨
 
 
@@ -38,7 +37,6 @@ def test_glossary_korean_from_translation_tags():
     marks[5] = [(at, at + 3, "abbr", "RAG")]
     tr = TranslationResult(ko=ko, mode="aligned", ko_marks=marks)
     rows = {e.term: e for e in G.build(a, G.korean_marks(tr))}
-    assert rows["AccentNet"].korean == "악센트넷"
     assert rows["RAG"].korean == ""        # 번역되지 않고 그대로 남은 약어는 한국어 칸에 넣지 않음
 
 
@@ -89,3 +87,14 @@ def test_only_jargon_that_korean_translation_does_not_explain():
     assert "dmodel" not in terms and "headi" not in terms   # 수식 기호가 붙은 말
     assert "ai" not in terms                            # 누구나 아는 약어
     assert {"softmax", "heuristic"} <= terms
+
+
+def test_person_and_model_names_are_kept_out_of_the_glossary():
+    t = ("McCann et al. (2017) used CoVe. LeCun et al. [12] trained ResNet on ImageNet. "
+         "We compare ResNet with a heuristic softmax. Retrieval-augmented generation (RAG) uses ImageNet features.")
+    a = analyze(t)
+    terms = {e.term for e in G.build(a)}
+    assert not ({"McCann", "LeCun", "ResNet", "ImageNet"} & terms)
+    assert "RAG" in terms and {"softmax", "heuristic"} <= terms     # 풀네임 있는 약어, 전문용어는 그대로
+    names = G.proper_names(a)
+    assert "ImageNet" in names and "ResNet" in names and "McCann" not in names and "LeCun" not in names

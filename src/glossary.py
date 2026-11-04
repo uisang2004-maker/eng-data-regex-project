@@ -148,6 +148,16 @@ def _masked(text: str) -> str:
     return text
 
 
+def looks_like_person(term: str, text: str) -> bool:
+    """사람·기관 이름인가: 쓰인 자리의 절반 이상에서 바로 뒤에 인용 표시(et al., [12], (2017))가 붙거나,
+    회사 꼬리말(GmbH)·모델 변형 기호(R50x1)이면 단어표에서 뺀다."""
+    if P.ORG_SUFFIX.match(term) or P.MODEL_CODE.match(term):
+        return True
+    hits = [m.end() for m in re.finditer(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", text)]
+    cited = sum(1 for end in hits if P.CITE_CUE.match(text, end))
+    return bool(hits) and cited * 2 >= len(hits)
+
+
 def rare_word_spans(text: str, starts: frozenset[int] = frozenset()) -> list[tuple[int, int, str]]:
     """전문용어 낱말(is_jargon_word)의 위치와 기본형. 기능어·논문 일반어·인용 속 이름은 뺀다.
     문장 첫머리가 아닌 곳의 대문자 낱말은 사람·기관 이름으로 보고 뺀다(starts: 문장 시작 위치)."""
@@ -157,8 +167,8 @@ def rare_word_spans(text: str, starts: frozenset[int] = frozenset()) -> list[tup
         low = w.lower()
         if len(w) < 4 or low in P.TERM_STOPWORDS or w.isupper() or any(f in P.TERM_GENERIC for f in _forms(w)):
             continue
-        if w[0].isupper() and m.start() not in starts:
-            continue
+        if w[0].isupper() and (m.start() not in starts or not re.search(rf"\b{re.escape(low)}\b", text)):
+            continue                       # 대문자로만 나오는 말(문장 첫머리의 저자 이름 Bahdanau 포함)은 이름으로 본다
         if any(is_jargon_word(p) for p in low.split("-")):
             out.append((m.start(), m.end(), low))
     return out
@@ -175,6 +185,21 @@ def _key(term: str) -> str:
                     for w in term.split())
 
 
+def proper_names(a: Analysis) -> list[str]:
+    """모델·데이터셋·기관 이름(ImageNet, ResNet, TriviaQA, 풀네임 없는 약어 ELMo·OpenAI). 처음 나온 순서.
+    뜻을 풀 '용어'가 아니라서 단어표에는 넣지 않고 화면에 이름 목록으로만 보여 준다.
+    사람 이름(McCann et al.), 누구나 아는 약어(AI), 수식 기호(KWi, R50x1)는 여기에도 넣지 않는다."""
+    found: dict[str, int] = {}
+    for abbr, long_form in a.acronyms.items():
+        if long_form or word_zipf(abbr.lower()) >= KNOWN_ACRONYM_ZIPF or (len(abbr) <= 3 and abbr[-1].islower()):
+            continue
+        pos = a.text.find(abbr)
+        found.setdefault(abbr, pos if pos >= 0 else 10**9)
+    for m in NAME.finditer(a.text):
+        found.setdefault(m.group(0), m.start())
+    return [n for n, _ in sorted(found.items(), key=lambda kv: kv[1]) if not looks_like_person(n, a.text)]
+
+
 def build(a: Analysis, ko_marks: list | None = None) -> list[Entry]:
     """단어표 행 목록(어려운 단어 위주). 처음 나온 순서로 정렬한다."""
     entries: dict[str, Entry] = {}
@@ -186,23 +211,20 @@ def build(a: Analysis, ko_marks: list | None = None) -> list[Entry]:
         return entries[k]
 
     starts = frozenset(s.start for s in a.sentences)
+    names = set(proper_names(a))
     for abbr, long_form in a.acronyms.items():
-        if word_zipf(abbr.lower()) >= KNOWN_ACRONYM_ZIPF or (len(abbr) <= 3 and abbr[-1].islower()):
-            continue                       # AI처럼 누구나 아는 약어, 수식 기호(KWi, QWi)
+        if not long_form or abbr in names:
+            continue                       # 풀네임이 없는 약어(ELMo, OpenAI)는 모델·기관 이름 쪽으로 보낸다
         e = get(abbr)
         e.kinds.append("abbr")
-        e.explanation = long_form or "이 글에서 정의를 찾지 못함"
-    for m in NAME.finditer(a.text):
-        if m.group(0) not in a.acronyms:
-            e = get(m.group(0))
-            if "name" not in e.kinds:
-                e.kinds.append("name")
+        e.explanation = long_form
     for x, y, tip in a.explanations:
         m = TIP_TERM.search(tip)
         if not m or "예시" in tip:
             continue
         term = m.group("term")
-        if re.search(r"\d|\bet al\b", term) or not (is_jargon(term) or NAME.search(term) or term in a.acronyms):
+        # 이름(ImageNet 등)은 설명처럼 보이는 동격 구문이 잘못 잡히기 쉬워(…ImageNet, a significant improvement…) 넣지 않는다
+        if re.search(r"\d|\bet al\b|\w\s+s\b", term) or term in names or not (is_jargon(term) or term in a.acronyms):
             continue                       # 'et al 2018' 같은 인용 조각, 쉬운 말은 뺀다
         e = get(term)
         if "explained" not in e.kinds:

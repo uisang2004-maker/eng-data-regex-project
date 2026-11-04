@@ -439,3 +439,15 @@
 4. 실행 결과: 샘플 300편 초록당 평균 **10.5개 → 4.6개**. BERT Introduction **33개 → 8개**(ELMo, GPT, OpenAI, BERT, MLM, concatenation, LM, NLP). Transformer "3 Model Architecture"는 encoder·decoder·embedding·softmax·positional encoding·sinusoidal 등 23개. `py -I -m pytest` **192 passed**(새 기준 테스트 추가, 옛 기준 테스트 2개 수정)
 5. 한계: 흔한 말로 된 전문용어(attention, self-attention, fine-tuning)는 빠짐. 이런 말은 반복 용어 밑줄 툴팁의 뜻 풀이로 보완
 
+### 2026-11-04 (27) — 단어표에서 이름 빼기
+
+1. 이의상 님 요청: 단어표 대부분이 사람 이름 같은 것들 → 개편.
+2. 실측: 7편 모든 절 단어표에서 대문자로 시작하는 항목을 모아 보니 사람 이름(McCann, LeCun, Bahdanau), 회사(GmbH), 모델 변형 기호(R50x1, R152x2, I21k)와 **모델·데이터셋 이름**(ImageNet, ResNet, TriviaQA, EdgeBoxes, OverFeat …, 75개)이 많았음. 이름은 뜻을 풀 '용어'가 아님
+3. 바꿈(`src/glossary.py`, `src/patterns.py`, `app.py`)
+   - 사람 이름: 쓰인 자리의 절반 이상에서 바로 뒤에 인용 표시(`CITE_CUE`: et al., [12], (2017), and X (…))가 붙으면 뺌. 문장 첫머리에서만 대문자로 나오고 소문자로는 안 나오는 말도 이름으로 봄
+   - 회사 꼬리말(`ORG_SUFFIX`), 모델 변형 기호(`MODEL_CODE`) 뺌
+   - 모델·데이터셋·기관 이름과 풀네임 없는 약어(ELMo, OpenAI)는 단어표에서 빼고, 표 아래에 **"이 글에 나온 모델·데이터셋·기관 이름"** 칩으로만 보여 줌(`proper_names`)
+   - 약어는 글 안에 풀네임이 있을 때만 단어표에 넣음(RAG → Retrieval-augmented generation). dataset은 일반어로
+4. 실행 결과: 7편 전 절 단어표 438개 중 대문자로 시작하는 것은 풀네임 있는 약어(RAG, RPN, MLM …)만 남음(이름 0). 샘플 300편 초록당 평균 4.6개 → **3.2개**. ViT "4 Experiments": scalability, optimizer, overfit, bottleneck, embedding, sinusoidal 등 전문용어 19개 + 이름 칩(ResNet, ViT, ImageNet, JFT …). `py -I -m pytest` **193 passed**
+5. 스크린샷: `docs/screenshots/phase3-glossary-names.jpg`(ImageNet이 남아 있던 수정 전 화면)
+

@@ -223,6 +223,10 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-gloss th, .pp-gloss td:nth-child(-n+5) { white-space: nowrap; }
 .pp-gloss td:nth-child(6) { min-width: 180px; }
 
+/* 단어표 아래 이름 목록 */
+.pp-names { margin:8px 0 4px; }
+.pp-chip.gray { color:#4c5d70; background:#eef2f6; }
+
 /* 논문 표 */
 .pp-table-cap { font-size:13px; color:#2c4560; line-height:1.55; margin:10px 0 6px; }
 
@@ -598,6 +602,18 @@ def flow_map(a, tr=None) -> str:
     return f'<div class="pp-flow">{arrow.join(steps)}</div>{note}'
 
 
+def names_line(a, rows) -> str:
+    """단어표에 넣지 않은 모델·데이터셋·기관 이름을 한 줄로(뜻을 풀 용어가 아니라 이름이라서)."""
+    in_table = {e.term for e in rows}
+    names = [n for n in G.proper_names(a) if n not in in_table]
+    if not names:
+        return ""
+    chips = "".join(f'<span class="pp-chip gray">{esc(n)}</span>' for n in names[:30])
+    more = f' <span class="pp-meta">외 {len(names) - 30}개</span>' if len(names) > 30 else ""
+    return (f'<div class="pp-names"><span class="pp-meta">이 글에 나온 모델·데이터셋·기관 이름 · 용어가 아니라 이름이라 '
+            f'단어표에서 뺐어요</span><div class="pp-chips" style="margin-top:4px">{chips}{more}</div></div>')
+
+
 def glossary_table(rows) -> str:
     ai = any(e.ai_meaning for e in rows)
     if not rows:
@@ -668,6 +684,7 @@ def paper_overview(paper) -> None:
         st.download_button("전체 단어표 내려받기(CSV)", G.to_csv(entries), file_name="paperpath_paper_glossary.csv",
                            mime="text/csv", key="paper_glossary_csv", disabled=not entries)
         st.markdown(glossary_table(entries), unsafe_allow_html=True)
+        st.markdown(names_line(whole, entries), unsafe_allow_html=True)
         st.caption("'처음 나온 곳'은 모든 절을 이어 붙였을 때의 문장 번호예요. 한국어 대응어는 절마다 번역했을 때 그 절의 단어표에 나와요.")
 
 
@@ -1162,9 +1179,10 @@ def reading_page() -> None:
     if ss.get("ai_gloss_error"):
         st.warning(ss.ai_gloss_error)
     st.markdown(glossary_table(rows), unsafe_allow_html=True)
+    st.markdown(names_line(a, rows), unsafe_allow_html=True)
     st.caption("한국어로 옮겨도 뜻이 바로 안 풀릴 전문용어만 골랐어요: 일상 영어에서 아주 드문 말(wordfreq Zipf 3.0 미만, "
-               "자주 나오는 말은 3.5 미만)·약어·모델 이름. 흔한 말에 접사가 붙은 말(unlabeled, bidirectional)·부사·인용 속 저자 이름·"
-               "누구나 아는 약어(AI)는 뺐어요. '한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이로 "
+               "자주 나오는 말은 3.5 미만), 글 안에 풀네임이 있는 약어, 글 안에 설명이 있는 이름. 흔한 말에 접사가 붙은 말"
+               "(unlabeled, bidirectional)·부사·사람 이름(et al. 등 인용 표시가 붙는 말)은 뺐고, 모델·데이터셋 이름은 표 아래에 따로 모았어요. '한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이로 "
                f"둘 다 참고용이에요(AI 풀이는 {MAX_TERMS}개까지).")
 
     b1, b2 = st.columns(2)

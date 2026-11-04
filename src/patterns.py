@@ -238,6 +238,7 @@ paper work study result approach method model task data performance system probl
 based new existing different two three four first one second various several large small high low however further well recent
 recently moreover thus therefore while whether number amount main level set way time case part type kind order term able given
 provide achieve improve effective effect significant important specific general previous current compute computed
+dataset datasets
 """.split())
 """어느 논문에나 자주 나오는 일반어. 한 단어로는 반복 용어로 보지 않는다(두 단어 용어의 뒷부분으로는 허용: 'language model')."""
 
@@ -513,3 +514,13 @@ CITE_NARRATIVE = re.compile(
     r"|\b[A-Z][A-Za-z'-]+\s+et\s+al\.?"
 )
 """문장 속 인용: ``Vaswani et al. (2017)``, ``Dolan and Brockett, 2005``, ``Radford et al.``. 단어표 후보에서 가린다."""
+
+CITE_CUE = re.compile(r"\s*(?:et\s+al\b|(?:and|&)\s+[A-Z][A-Za-z'-]+\s*(?:\[|\(|,?\s*\d{4})|\[\d|\(\d{4}|,\s*\d{4}[a-z]?\b|'s\s+(?:work|method|model))")
+"""낱말 바로 뒤의 인용 표시: ``McCann et al.``, ``LeCun and Bengio (1995)``, ``Smith [12]``, ``Dolan, 2005``.
+단어표 후보가 이렇게 쓰이면 사람(저자) 이름으로 보고 뺀다."""
+
+ORG_SUFFIX = re.compile(r"^(?:GmbH|Inc|Ltd|Corp|LLC|AG|SA|Co)\.?$")
+"""회사 이름 꼬리말. 단어표에 넣지 않는다."""
+
+MODEL_CODE = re.compile(r"^[A-Z]\d+[a-z]?\d*(?:x\d+)?$|^[A-Z]\d*x$")
+"""한 글자 + 숫자로 된 모델 변형 기호(R50x1, R152x2, I21k, W1x). 뜻을 알 수 없는 기호라 단어표에서 뺀다."""
