@@ -232,3 +232,28 @@ def test_frequent_term_tooltip_shows_meaning(at):
     at.session_state["ai_gloss"] = {key: {"reranker": "검색 결과 순위를 다시 매기는 모델"}}
     at.run()
     assert "reranker: 검색 결과 순위를 다시 매기는 모델" in md_text(at)
+
+
+def test_korean_highlight_tooltip_matches_english(at):
+    import hashlib
+    import html as H
+
+    from src.extract import analyze
+    from src.translate import TranslationResult
+
+    text = ("The reranker scores passages. A reranker is small. We train the reranker on data. "
+            "Our reranker may help retrieval.")
+    at.session_state["input_text"] = text
+    a = analyze(text)
+    tk = hashlib.sha256(a.text.encode("utf-8")).hexdigest()[:16]
+    ko = ["재순위 모델이 문단에 점수를 매긴다.", "재순위 모델은 작다.", "우리는 재순위 모델을 학습한다.",
+          "우리의 재순위 모델은 검색에 도움이 될 수 있다."]
+    km = [[(0, 6, "term", "reranker")], [(0, 6, "term", "reranker")], [(4, 10, "term", "reranker")],
+          [(4, 10, "term", "reranker"), (21, 25, "hedge", "may")]]
+    at.session_state["translations"] = {(tk, True): TranslationResult(ko=ko, mode="aligned", ko_marks=km,
+                                                                      protected=[[]] * 4)}
+    at.session_state["ai_gloss"] = {tk: {"reranker": "검색 결과 순위를 다시 매기는 모델"}}
+    at.run()
+    out = H.unescape(md_text(at))
+    assert "reranker: 검색 결과 순위를 다시 매기는 모델 · 이 글에 4번 · 영어 'reranker'에 대응" in out
+    assert "추측·가능성" in out and "영어 'may'에 대응" in out

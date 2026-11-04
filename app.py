@@ -487,14 +487,35 @@ def render_layers(text: str, spans, underline=None) -> str:
     return "".join(out)
 
 
-def render_ko(ko: str, ko_marks, active, underline=None) -> str:
-    """번역문 형광펜·밑줄. 위치는 DeepL이 옮긴 태그에서 복원한 것이라 툴팁에 '대응 추정'임을 밝힌다."""
+def render_ko(ko: str, ko_marks, active, underline=None, en_tips: dict | None = None) -> str:
+    """번역문 형광펜·밑줄. 툴팁은 영어 원문의 같은 표시와 같은 설명(뜻·규칙)을 보여 주고,
+    위치는 번역기가 옮긴 태그에서 복원한 것이라 '영어 ○○에 대응'을 덧붙인다."""
     spans, last = [], -1
     for a, b, cat, en in ko_marks:
         if CAT_RULE.get(cat) in active and a >= last:
-            spans.append((a, b, f"pp-m {cat}", f"{MARK_LABEL[cat]} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)"))
+            tip = (en_tips or {}).get((cat, (en or "").lower())) or MARK_LABEL[cat]
+            spans.append((a, b, f"pp-m {cat}", f"{tip} · 영어 '{en}'에 대응 (번역기가 옮긴 위치)"))
             last = b
     return render_layers(ko, spans, underline)
+
+
+def mark_tip(m) -> str:
+    """표시 툴팁: '범주 · 설명'. 설명이 이미 범주 이름으로 시작하면(확신 · …) 두 번 쓰지 않는다."""
+    label = MARK_LABEL[m.category]
+    return m.tip if m.tip.startswith(label) else f"{label} · {m.tip}"
+
+
+def en_tips(a, i: int) -> dict[tuple[str, str], str]:
+    """i번째 문장의 영어 표시 툴팁: (범주, 영어 표현 소문자) → 영어 쪽과 같은 설명. 반복 용어는 뜻 풀이."""
+    s = a.sentences[i]
+    tips = st.session_state.get("term_tips", {}).get(text_key(a.text), {})
+    out = {}
+    for m in a.marks:
+        if m.end > s.start and m.start < s.end:
+            phrase = a.text[m.start:m.end]
+            out.setdefault((m.category, phrase.lower()),
+                           term_tip(phrase, m.tip, tips) if m.category == "term" else mark_tip(m))
+    return out
 
 
 def card_underlines(a) -> dict[int, list]:
@@ -527,7 +548,7 @@ def render_marked(text: str, start: int, end: int, marks, underline=None) -> str
     """원문 문장(text[start:end]) 렌더링. underline은 문장 안 위치."""
     tips = st.session_state.get("term_tips", {}).get(text_key(text), {})
     spans = [(max(m.start, start) - start, min(m.end, end) - start, f"pp-m {m.category}",
-              term_tip(text[m.start:m.end], m.tip, tips) if m.category == "term" else f"{MARK_LABEL[m.category]} · {m.tip}")
+              term_tip(text[m.start:m.end], m.tip, tips) if m.category == "term" else mark_tip(m))
              for m in marks if m.end > start and m.start < end]
     return render_layers(text[start:end], spans, underline)
 
@@ -929,7 +950,8 @@ def ko_html(res, i: int, a, off=None) -> str:
     if off and off.ko is not None and i < len(off.ko) and off.ko[i] != res.ko[i]:
         extra = f'<div class="pp-off">마스킹 끔: {esc(off.ko[i])}</div>'
     body = render_ko(res.ko[i], marks_ko[i] if i < len(marks_ko) else [], a.active_rules,
-                     as_wrappers(uls_ko[i]) if i < len(uls_ko) else None)
+                     as_wrappers(uls_ko[i]) if i < len(uls_ko) else None,
+                     en_tips(a, i) if i < len(a.sentences) else None)
     return f'<div class="pp-text">{body}</div>{extra}'
 
 
