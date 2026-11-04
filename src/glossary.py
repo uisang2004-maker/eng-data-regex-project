@@ -1,12 +1,13 @@
 """단어표: 이 글을 읽는 데 필요한 **어려운 단어(전문용어)**를 한 표로 모은다.
 
-"어려움"은 일상 영어에서 얼마나 자주 쓰이는지로 정한다.
+기준: **한국어로 옮겨도 뜻이 바로 안 풀릴 전문용어**만 넣는다(이의상 요청, 2026-11-04).
 - 기준 자료: wordfreq 3.1.1의 영어 단어 빈도(Zipf 척도). data/processed/en_word_zipf.tsv에 Zipf 3.0 이상인
   단어만 저장해 두었다(CC BY-SA 4.0, 출처는 파일 머리말과 README).
-- Zipf 3.5 이상(label 4.43, sentence 4.58, module 등)은 일상어로 보고 뺀다. 3.0~3.5는 '중', 3.0 미만이거나 목록에 없으면 '상'.
-  (샘플 300편에서 기준 4.0은 초록당 평균 17.5개로 너무 많아 3.5로 정함: 평균 10.5개, 2026-11-04 측정)
-- 두 단어 용어는 더 드문 단어를 기준으로 한다.
-- 약어와 대문자가 섞인 이름(모델·데이터셋 이름)은 빈도와 상관없이 넣는다.
+- 낱말은 Zipf 3.0 미만(목록에 없으면 0)일 때만, 3번 이상 나오는 반복 용어는 3.5 미만(transformer 3.37)일 때 넣는다.
+- 흔한 말에 접두·접미사가 붙은 말(unlabeled ← label, bidirectional ← direction, outperforming ← perform)은
+  한국어로 옮기면 풀리므로 뺀다. 부사(-ly), 인용 속 저자 이름(Vaswani et al.), 수식 기호가 붙은 말(dmodel), AI 같은 약어도 뺀다.
+  (샘플 300편: 초록당 평균 10.5개 → 4.6개, BERT Introduction 33개 → 8개)
+- 두 단어 용어는 하나라도 전문용어 낱말이 있으면 넣는다. 약어와 모델·데이터셋 이름(대문자가 섞인 말)은 넣는다.
 
 정규식이 찾은 결과만 모은다(새로 지어내지 않음). 한국어는 번역을 실행했을 때 번역기가 옮긴 태그에서 가져온다.
 """
@@ -24,8 +25,12 @@ from src.extract import Analysis, frequent_terms
 ROOT = Path(__file__).resolve().parents[1]
 ZIPF_PATH = ROOT / "data" / "processed" / "en_word_zipf.tsv"
 
-EASY_ZIPF = 3.5     # 이 이상이면 일상어 → 단어표에서 제외
+EASY_ZIPF = 3.5     # (예전 기준) 이 이상이면 일상어
 HARD_ZIPF = 3.0     # 이 미만(또는 목록에 없음)이면 난이도 '상'
+JARGON_ZIPF = 3.0           # 낱말 하나가 전문용어가 되려면 이보다 드물어야 한다
+TERM_JARGON_ZIPF = 3.5      # 3번 이상 나오는 반복 용어는 조금 넓게(transformer 3.37, embedding 3.0)
+COMMON_STEM_ZIPF = 4.0      # 접두·접미사를 떼어 이만큼 흔한 낱말이 나오면 한국어로 풀리는 말
+KNOWN_ACRONYM_ZIPF = 4.0    # AI(4.23)처럼 일상에서도 쓰는 약어는 뺀다
 
 KO_GLOSS_PARTICLE = re.compile(r"(?<=[가-힣])(?:을|를|에서|에|으로|은|는)$")
 """단어표의 한국어 대응어 끝 조사를 뗀다('관련성을' → '관련성'). 명사 끝 글자와 헷갈리는 가·이·의·로는 일부러 뺐다."""
@@ -102,15 +107,59 @@ def is_hard(term: str) -> bool:
     return term_zipf(term) < EASY_ZIPF
 
 
-def rare_word_spans(text: str) -> list[tuple[int, int, str]]:
-    """일상어가 아닌 단어(Zipf 3.5 미만, 4글자 이상, 기능어·논문 일반어 제외)의 위치와 기본형."""
+def _stems(w: str) -> set[str]:
+    """접두사 하나·접미사 두 번까지 떼어 본 후보: unidirectionality → directionality, directional, direction …"""
+    w = w.lower()
+    cands = {w}
+    m = P.JARGON_PREFIX.match(w)
+    if m:
+        cands.add(w[m.end():])
+    for _ in range(2):
+        cands |= {P.JARGON_SUFFIX.sub("", c) for c in cands}
+    cands |= {c[:-1] for c in cands if len(c) >= 4 and c[-1] == c[-2]}    # summing → summ → sum
+    return {c for c in cands if len(c) >= 3 and c != w}
+
+
+def derived_from_common(w: str) -> bool:
+    """흔한 낱말에 접두·접미사가 붙은 것(unlabeled ← label, bidirectional ← direction, outperforming ← perform).
+    한국어로 옮기면 바로 풀리는 말이라 전문용어로 보지 않는다."""
+    return any(word_zipf(c) >= COMMON_STEM_ZIPF for c in _stems(w))
+
+
+def is_jargon_word(w: str, limit: float = JARGON_ZIPF) -> bool:
+    low = w.lower()
+    if len(low) < 4 or not low.isalpha() or low.endswith("ly"):
+        return False                       # 짧은 말, 숫자 섞인 말, 부사(holistically)는 뺀다
+    if any(word_zipf(c) >= COMMON_STEM_ZIPF for c in (low[1:], low[:-1])):
+        return False                       # 수식 기호가 붙은 흔한 말: dmodel(d+model), headi(head+i)
+    rarity = max(word_zipf(low), word_zipf(low + "s"))     # 기본형으로 줄어든 말(approache → approaches)
+    return rarity < limit and not derived_from_common(low)
+
+
+def is_jargon(term: str, limit: float = JARGON_ZIPF) -> bool:
+    """한국어로 옮겨도 뜻이 바로 안 풀릴 전문용어인가: 낱말(하이픈 조각 포함) 하나라도 드물고 흔한 말에서 온 말이 아니면."""
+    return any(is_jargon_word(p, limit) for p in re.split(r"[\s-]+", term))
+
+
+def _masked(text: str) -> str:
+    """인용·주소 안의 낱말(저자 이름 Vaswani, github)은 단어표 후보가 아니라서 같은 길이 빈칸으로 가린다."""
+    for pat in (P.CITE_AUTHOR, P.CITE_NUM, P.URL, P.CITE_NARRATIVE):
+        text = pat.sub(lambda m: " " * len(m.group(0)), text)
+    return text
+
+
+def rare_word_spans(text: str, starts: frozenset[int] = frozenset()) -> list[tuple[int, int, str]]:
+    """전문용어 낱말(is_jargon_word)의 위치와 기본형. 기능어·논문 일반어·인용 속 이름은 뺀다.
+    문장 첫머리가 아닌 곳의 대문자 낱말은 사람·기관 이름으로 보고 뺀다(starts: 문장 시작 위치)."""
     out = []
-    for m in WORD.finditer(text):
+    for m in WORD.finditer(_masked(text)):
         w = m.group(0)
         low = w.lower()
         if len(w) < 4 or low in P.TERM_STOPWORDS or w.isupper() or any(f in P.TERM_GENERIC for f in _forms(w)):
             continue
-        if word_zipf(w) < EASY_ZIPF:
+        if w[0].isupper() and m.start() not in starts:
+            continue
+        if any(is_jargon_word(p) for p in low.split("-")):
             out.append((m.start(), m.end(), low))
     return out
 
@@ -136,7 +185,10 @@ def build(a: Analysis, ko_marks: list | None = None) -> list[Entry]:
             entries[k] = Entry(term)
         return entries[k]
 
+    starts = frozenset(s.start for s in a.sentences)
     for abbr, long_form in a.acronyms.items():
+        if word_zipf(abbr.lower()) >= KNOWN_ACRONYM_ZIPF or (len(abbr) <= 3 and abbr[-1].islower()):
+            continue                       # AI처럼 누구나 아는 약어, 수식 기호(KWi, QWi)
         e = get(abbr)
         e.kinds.append("abbr")
         e.explanation = long_form or "이 글에서 정의를 찾지 못함"
@@ -150,21 +202,23 @@ def build(a: Analysis, ko_marks: list | None = None) -> list[Entry]:
         if not m or "예시" in tip:
             continue
         term = m.group("term")
-        if not (is_hard(term) or NAME.search(term) or term in a.acronyms):
-            continue
+        if re.search(r"\d|\bet al\b", term) or not (is_jargon(term) or NAME.search(term) or term in a.acronyms):
+            continue                       # 'et al 2018' 같은 인용 조각, 쉬운 말은 뺀다
         e = get(term)
         if "explained" not in e.kinds:
             e.kinds.append("explained")
         if not e.explanation:
             e.explanation = a.text[x:y]
     for term, _, _ in frequent_terms(a.text):
-        if is_hard(term):
+        lower_seen = re.search(rf"(?<![A-Za-z]){re.escape(term.lower())}", _masked(a.text))
+        if lower_seen and is_jargon(term, TERM_JARGON_ZIPF):   # 자주 나오는 말은 조금 넓게(transformer 3.37).
+            # 소문자로 한 번도 안 나오는 말(인용 속 저자 이름 Radford)은 뺀다
             e = get(term)
             if "term" not in e.kinds:
                 e.kinds.append("term")
     covered = [k for k in entries]
     long_words = {w.lower() for v in a.acronyms.values() if v for w in re.split(r"[\s-]+", v)}
-    for x, y, low in rare_word_spans(a.text):
+    for x, y, low in rare_word_spans(a.text, starts):
         k = _key(low)
         if k in entries or any(k in c.split() for c in covered) or set(re.split(r"-", low)) & long_words:
             continue        # 이미 있는 용어의 일부이거나 약어 풀네임 안의 단어는 중복이라 뺀다
@@ -172,6 +226,8 @@ def build(a: Analysis, ko_marks: list | None = None) -> list[Entry]:
 
     for e in entries.values():
         e.count, pos = _count(a.text, e.term)
+        if pos is not None and e.term.lower() not in a.text.lower():
+            e.term = WORD.match(a.text, pos).group(0)     # 기본형(approache)이 아니라 글에 나온 모양으로 보여 준다
         if pos is not None:
             e.first_sentence = next((s.idx + 1 for s in a.sentences if s.start <= pos < s.end), None)
         if not ({"abbr", "name"} & set(e.kinds)):
@@ -189,7 +245,7 @@ def build(a: Analysis, ko_marks: list | None = None) -> list[Entry]:
 
 def jargon_marks(a: Analysis) -> list[tuple[int, int, str]]:
     """번역 때 한국어 대응어를 얻으려고 보내는 어려운 단어 태그(화면에는 그리지 않음)."""
-    return [(x, y, "jargon") for x, y, _ in rare_word_spans(a.text)]
+    return [(x, y, "jargon") for x, y, _ in rare_word_spans(a.text, frozenset(s.start for s in a.sentences))]
 
 
 def korean_marks(tr) -> list[list[tuple]]:

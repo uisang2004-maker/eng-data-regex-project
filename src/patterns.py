@@ -237,7 +237,7 @@ TERM_GENERIC = frozenset("""
 paper work study result approach method model task data performance system problem use used using propose proposed show shown
 based new existing different two three four first one second various several large small high low however further well recent
 recently moreover thus therefore while whether number amount main level set way time case part type kind order term able given
-provide achieve improve effective effect significant important specific general previous current
+provide achieve improve effective effect significant important specific general previous current compute computed
 """.split())
 """어느 논문에나 자주 나오는 일반어. 한 단어로는 반복 용어로 보지 않는다(두 단어 용어의 뒷부분으로는 허용: 'language model')."""
 
@@ -499,3 +499,17 @@ TABLE_MENTION = re.compile(r"\b(?:Tables?|Tab\.)\s+\d{1,2}(?:\s*(?:,|and|&|–|-
 
 DEHYPHEN_SPACE = re.compile(r"(?<=[a-z])- (?=[a-z])")
 """캡션처럼 줄을 공백으로 이은 글에서 줄 끝 하이픈 지우기: ``Human per- formance`` → ``Human performance``."""
+
+# ====================================================================== 단어표 전문용어 기준 (glossary)
+
+JARGON_PREFIX = re.compile(r"^(?:multi|inter|under|semi|over|uni|pre|non|sub|dis|mis|out|un|re|bi|de|co)(?=[a-z]{4,})")
+"""흔한 말에 붙는 접두사(긴 것부터: uni를 un보다 먼저). 떼고 남은 말이 흔하면(unlabeled → labeled) 전문용어로 보지 않는다."""
+
+JARGON_SUFFIX = re.compile(r"(?:ally|ness|ities|ity|izations?|ized?|izes|ations?|able|wards?|al|ed|ing|ers?|s)$")
+"""흔한 말에 붙는 접미사(bidirectional → bidirection → direction 처럼 두 번까지 뗀다)."""
+
+CITE_NARRATIVE = re.compile(
+    r"\b[A-Z][A-Za-z'-]+(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z'-]+)?,?\s*\(?\d{4}[a-z]?\)?"
+    r"|\b[A-Z][A-Za-z'-]+\s+et\s+al\.?"
+)
+"""문장 속 인용: ``Vaswani et al. (2017)``, ``Dolan and Brockett, 2005``, ``Radford et al.``. 단어표 후보에서 가린다."""

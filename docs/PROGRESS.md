@@ -427,3 +427,15 @@
    - 뜻 풀이 요청은 번역의 '한 번 4,000자' 한도를 보지 않고 화면·하루 한도만 봄(처음엔 10,280자로 막힘 → 수정)
 3. 실행 결과: `py -I -m pytest` **191 passed**. BERT "1 Introduction"을 번역하자 툴팁이 "fine-tuning: 사전학습된 모델을 downstream 과제에 맞춰 추가로 학습시키는 방식(미세조정) · 이 글에 4번"처럼 바뀜(번역+뜻 풀이 46초)
 
+### 2026-11-04 (26) — 단어표를 진짜 전문용어만으로
+
+1. 이의상 님 요청: 단어표 단어가 너무 많음. 한국어로 번역해도 이해 못할 만한 전문적인 단어만.
+2. 실측(전): BERT "1 Introduction" 33개 중 저자 이름(Radford·Vaswani·Bowman 등 9개), `et al 2018` 같은 인용 조각, `holistically`·`outperforming`·`unidirectional`처럼 한국어로 옮기면 풀리는 말이 많았음
+3. 기준 바꿈(`src/glossary.py`, `src/patterns.py`)
+   - 낱말은 Zipf 3.0 미만일 때만(반복 용어는 3.5 미만)
+   - 흔한 말 + 접사(`JARGON_PREFIX`·`JARGON_SUFFIX`로 떼어 Zipf 4.0 이상인 말이 나오면) 제외: unlabeled, bidirectional, reranker, summing
+   - 부사(-ly), 인용 속 이름(`CITE_AUTHOR`·`CITE_NUM`·`CITE_NARRATIVE`로 가림), 문장 첫머리가 아닌 대문자 낱말(사람·기관 이름), 수식 기호가 붙은 말(dmodel, headi, KWi), 누구나 아는 약어(AI) 제외
+   - 소문자로 한 번도 안 나오는 반복 용어(인용의 Radford) 제외, 기본형(approache) 대신 글에 나온 모양으로 표시
+4. 실행 결과: 샘플 300편 초록당 평균 **10.5개 → 4.6개**. BERT Introduction **33개 → 8개**(ELMo, GPT, OpenAI, BERT, MLM, concatenation, LM, NLP). Transformer "3 Model Architecture"는 encoder·decoder·embedding·softmax·positional encoding·sinusoidal 등 23개. `py -I -m pytest` **192 passed**(새 기준 테스트 추가, 옛 기준 테스트 2개 수정)
+5. 한계: 흔한 말로 된 전문용어(attention, self-attention, fine-tuning)는 빠짐. 이런 말은 반복 용어 밑줄 툴팁의 뜻 풀이로 보완
+

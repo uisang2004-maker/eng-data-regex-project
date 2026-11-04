@@ -1162,9 +1162,10 @@ def reading_page() -> None:
     if ss.get("ai_gloss_error"):
         st.warning(ss.ai_gloss_error)
     st.markdown(glossary_table(rows), unsafe_allow_html=True)
-    st.caption("단어는 정규식과 일상 영어 빈도로 골랐어요: 드문 단어(전문용어)·약어·모델 이름. 난이도는 wordfreq 빈도 기준"
-               "(Zipf 3.0 미만 '상', 3.0~3.5 '중'). '한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이로 "
-               f"둘 다 참고용이에요(AI 풀이는 처음 나온 순서로 {MAX_TERMS}개까지).")
+    st.caption("한국어로 옮겨도 뜻이 바로 안 풀릴 전문용어만 골랐어요: 일상 영어에서 아주 드문 말(wordfreq Zipf 3.0 미만, "
+               "자주 나오는 말은 3.5 미만)·약어·모델 이름. 흔한 말에 접사가 붙은 말(unlabeled, bidirectional)·부사·인용 속 저자 이름·"
+               "누구나 아는 약어(AI)는 뺐어요. '한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이로 "
+               f"둘 다 참고용이에요(AI 풀이는 {MAX_TERMS}개까지).")
 
     b1, b2 = st.columns(2)
     defined = {k: v for k, v in a.acronyms.items() if v}

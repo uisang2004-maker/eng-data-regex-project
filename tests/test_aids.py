@@ -54,8 +54,9 @@ def test_easy_words_are_excluded_and_rare_words_have_levels():
          "We use a stochastic reranker with heuristic annotation.")
     rows = {e.term.lower(): e for e in G.build(analyze(t))}
     assert "label" not in rows and "sentence" not in rows          # 일상어(Zipf 4.0 이상)
-    assert rows["stochastic"].level == "중"                          # Zipf 3.11
-    assert rows["heuristic"].level == "상" and rows["reranker"].level == "상"
+    assert "stochastic" not in rows                                 # Zipf 3.11: 전문용어 기준(3.0 미만)보다 흔함
+    assert "reranker" not in rows                                   # rank(흔한 말)에 re-·-er가 붙은 말
+    assert rows["heuristic"].level == "상"
 
 
 def test_generic_academic_words_and_long_form_words_are_excluded():
@@ -71,6 +72,20 @@ def test_word_zipf_uses_base_forms():
 
 
 def test_jargon_marks_are_for_translation_only():
-    a = analyze("A stochastic reranker helps.")
-    assert [a.text[x:y] for x, y, _ in G.jargon_marks(a)] == ["stochastic", "reranker"]
+    a = analyze("A heuristic softmax helps.")
+    assert [a.text[x:y] for x, y, _ in G.jargon_marks(a)] == ["heuristic", "softmax"]
     assert not any(m.category == "jargon" for m in a.marks)
+
+
+
+def test_only_jargon_that_korean_translation_does_not_explain():
+    t = ("Following Vaswani et al. (2017), the unlabeled data are processed holistically. "
+         "Our bidirectional model is outperforming baselines. We apply softmax and a heuristic. "
+         "The dmodel and headi values come from the AI system.")
+    terms = {e.term.lower() for e in G.build(analyze(t))}
+    assert "vaswani" not in terms                       # 인용 속 저자 이름
+    assert "unlabeled" not in terms and "bidirectional" not in terms and "outperforming" not in terms   # 흔한 말 + 접사
+    assert "holistically" not in terms                  # 부사
+    assert "dmodel" not in terms and "headi" not in terms   # 수식 기호가 붙은 말
+    assert "ai" not in terms                            # 누구나 아는 약어
+    assert {"softmax", "heuristic"} <= terms
