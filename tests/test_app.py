@@ -129,3 +129,14 @@ def test_cards_show_korean_and_underline(at):
     text = md_text(at)
     assert 'class="pp-sk-ko"' in text and " 1입니다." in text   # "번역문"은 밑줄 태그로 감싸져 있다
     assert text.count('class="pp-u method"') >= 2   # 원문 카드·원문 패널·번역 쪽
+
+
+def test_translation_blocked_after_session_limit(at, monkeypatch, tmp_path):
+    from src import usage
+
+    at.session_state["deepl_calls"] = usage.MAX_CALLS_PER_SESSION
+    at.session_state["input_text"] = "A short new sentence for testing limits. Another sentence here."
+    at.run()
+    at.button(key="translate_btn").click().run()
+    assert not at.exception
+    assert any("번까지" in w.value for w in at.warning)

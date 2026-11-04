@@ -28,6 +28,20 @@ py -m venv .venv
 2. `.env`에 `DEEPL_API_KEY=<본인 키>`를 적습니다. **`.env`는 커밋되지 않습니다.**
 3. 번역은 화면의 **번역하기** 버튼을 눌렀을 때만 호출됩니다. 입력한 영어 문장이 DeepL로 전송됩니다.
 
+### 공개 사이트로 배포 (Streamlit Community Cloud)
+
+1. [share.streamlit.io](https://share.streamlit.io)에 GitHub 계정으로 로그인합니다.
+2. **Create app** → **Yup, I have an app** → 저장소 `uisang2004-maker/eng-data-regex-project`, 브랜치 `main`, 파일 `app.py`를 고릅니다.
+3. **Advanced settings**에서 Python 3.12를 고르고, **Secrets** 칸에 `DEEPL_API_KEY = "본인 키"`를 적습니다. 키는 이 칸에만 적고 저장소에는 넣지 않습니다.
+4. **Deploy**를 누릅니다. 비공개 저장소에서 만든 앱은 처음에 비공개라서, 앱의 **Share → Make this app public**으로 공개합니다.
+
+공개 사이트의 번역은 DeepL 무료 한도를 지키기 위해 제한됩니다([src/usage.py](src/usage.py)).
+- 한 번에 3,000자까지
+- 한 화면(세션)당 10회
+- 사이트 전체 하루 30,000자
+
+하루 사용량은 서버 파일로 세기 때문에, 서버가 재시작되면 다시 0부터 셀 수 있습니다. 실제 기준은 DeepL 계정의 사용량입니다.
+
 ### 테스트
 
 ```bash

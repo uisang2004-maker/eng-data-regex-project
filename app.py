@@ -11,6 +11,7 @@ import streamlit as st
 
 from src import patterns as P
 from src import translate as T
+from src import usage
 from src.analyze import load_benchmark, skeleton_stats
 from src.collect import ArxivError, fetch_abstract, load_samples
 from src.extract import analyze
@@ -229,6 +230,7 @@ def init_state() -> None:
     ss.setdefault("show_steps", False)
     ss.setdefault("show_translation", True)
     ss.setdefault("input_error", None)
+    ss.setdefault("deepl_calls", 0)
 
 
 @st.cache_resource
@@ -495,6 +497,28 @@ def steps_panel(a) -> None:
         rule_toggles()
 
 
+def deepl_key() -> str | None:
+    """배포 사이트는 Streamlit 비밀값(st.secrets), 로컬은 .env에서 키를 읽는다. 키 값은 화면·로그에 내보내지 않는다."""
+    try:
+        key = st.secrets.get("DEEPL_API_KEY")
+    except Exception:          # 로컬에 secrets.toml이 없으면 예외가 난다
+        key = None
+    return key or T.load_api_key()
+
+
+def limited_caller(texts: list[str], key: str, split: str) -> list[str]:
+    """실제로 DeepL을 부르는 순간에만 사용 제한을 확인하고 센다(캐시에서 답하면 세지 않음)."""
+    ss = st.session_state
+    chars = sum(len(T.unprotect(t)) for t in texts)
+    reason = usage.check(chars, ss.deepl_calls)
+    if reason:
+        raise T.TranslationError(reason)
+    out = T.call_deepl(texts, key, split)
+    usage.record(chars)
+    ss.deepl_calls += 1
+    return out
+
+
 def translation_panel(a) -> None:
     ss = st.session_state
     sents = [s.text for s in a.sentences]
@@ -519,6 +543,7 @@ def translation_panel(a) -> None:
             if st.button("번역하기", type="primary", key="translate_btn"):
                 with st.spinner("번역하는 중…"):
                     ss.translations[(tkey, True)] = T.translate(sents, a.acronyms, masked=True, use_file_cache=file_cache,
+                                                                api_key=deepl_key(), caller=limited_caller,
                                                                 **dict(zip(("marks", "underlines"), translation_layers(ss.input_text))))
                 st.rerun()
             return
@@ -552,7 +577,8 @@ def translation_panel(a) -> None:
         if off is None:
             if st.button("마스킹 끔과 비교", key="compare_btn", help="보호 마스킹 없이 한 번 더 번역해 차이를 보여 줘요(DeepL 추가 호출)"):
                 with st.spinner("마스킹 없이 번역하는 중…"):
-                    ss.translations[(tkey, False)] = T.translate(sents, a.acronyms, masked=False, use_file_cache=file_cache)
+                    ss.translations[(tkey, False)] = T.translate(sents, a.acronyms, masked=False, use_file_cache=file_cache,
+                                                                 api_key=deepl_key(), caller=limited_caller)
                 st.rerun()
         elif off.ko is None:
             st.warning(off.error or "비교 번역을 만들지 못했어요.")
@@ -563,6 +589,8 @@ def translation_panel(a) -> None:
             st.info(f"보호 토큰 {len(toks)}개 중 마스킹 끔에서 바뀐 것 {len(lost_off)}개"
                     f"{(' (' + ', '.join(lost_off[:5]) + ')') if lost_off else ''} · 번역이 달라진 문장 {diff}개. "
                     "차이가 작을 수 있어요(검증 결과 탭의 30편 실측 참고).")
+        st.caption(f"번역 사용: 이 화면 {ss.deepl_calls}/{usage.MAX_CALLS_PER_SESSION}회 · "
+                   f"오늘 사이트 전체 {usage.used_today():,}/{usage.DAILY_CHAR_CAP:,}자 · 한 번에 {usage.MAX_CHARS_PER_REQUEST:,}자까지")
 
 
 def reading_page() -> None:

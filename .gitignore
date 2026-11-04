@@ -23,3 +23,6 @@ Thumbs.db
 
 # 로컬 도구 설정
 .claude/
+
+# 공개 사이트의 하루 번역 사용량(서버에서만 의미 있음)
+data/processed/usage_today.json
