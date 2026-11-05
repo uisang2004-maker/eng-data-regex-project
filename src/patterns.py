@@ -509,6 +509,10 @@ DEHYPHEN_SPACE = re.compile(r"(?<=[a-z])- (?=[a-z])")
 
 # ====================================================================== 단어표 전문용어 기준 (glossary)
 
+GLOSS_INFLECTION = re.compile(r"(?:ions?|ings?|ed|es|(?<![siu])s|e)$")
+"""단어표에서 같은 낱말의 어형을 묶을 때 떼는 꼬리: annotate·annotating·annotated·annotation → annotat.
+analysis·virus·class처럼 s로 끝나는 원형은 s를 떼지 않는다."""
+
 JARGON_PREFIX = re.compile(r"^(?:multi|inter|under|semi|over|uni|pre|non|sub|dis|mis|out|un|re|bi|de|co)(?=[a-z]{4,})")
 """흔한 말에 붙는 접두사(긴 것부터: uni를 un보다 먼저). 떼고 남은 말이 흔하면(unlabeled → labeled) 전문용어로 보지 않는다."""
 

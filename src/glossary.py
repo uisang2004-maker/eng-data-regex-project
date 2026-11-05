@@ -175,14 +175,26 @@ def rare_word_spans(text: str, starts: frozenset[int] = frozenset()) -> list[tup
 
 
 def _count(text: str, term: str) -> tuple[int, int | None]:
-    pat = re.compile(rf"\b{re.escape(term)}(?:e?s|d|ed|ing)?\b", re.I)
+    """등장 횟수와 처음 위치. 소문자 한 낱말은 같은 줄기의 어형(annotate·annotating·annotated)을 모두 센다."""
+    if term.islower() and " " not in term and _stem(term) != term:
+        pat = re.compile(rf"\b{re.escape(_stem(term))}(?:e|es|ed|ing|ings|ion|ions|s)?\b", re.I)
+    else:
+        pat = re.compile(rf"\b{re.escape(term)}(?:e?s|d|ed|ing)?\b", re.I)
     hits = list(pat.finditer(text))
     return len(hits), (hits[0].start() if hits else None)
 
 
+def _stem(w: str) -> str:
+    """같은 낱말의 어형을 한 줄로 묶는 열쇠: annotate·annotating·annotated·annotation → annotat.
+    대문자가 든 말(약어·이름: NER과 NE는 서로 다른 약어)은 건드리지 않는다. 남는 줄기가 4글자 미만이면 그대로 둔다."""
+    if not w.islower():
+        return w.lower()
+    s = P.GLOSS_INFLECTION.sub("", w)
+    return s if len(s) >= 4 else w
+
+
 def _key(term: str) -> str:
-    return " ".join(_forms(w)[-1] if w.lower().endswith(("ies", "s")) and not w.lower().endswith("ss") else w.lower()
-                    for w in term.split())
+    return " ".join(_stem(w) for w in term.split())
 
 
 def proper_names(a: Analysis) -> list[str]:

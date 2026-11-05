@@ -330,3 +330,18 @@ def test_reopen_saved_pdf_document_without_file(blank):
     blank.button(key="reinput_btn").click().run()
     blank.button(key=f"doc_del_{rec['id']}").click().run()
     assert rec["id"] not in blank.session_state["browser_docs"]
+
+
+def test_glossary_preview_and_cards_above(at):
+    words = ["heuristic", "softmax", "concatenation", "sinusoid", "transduction", "monolingual", "entailment",
+             "extrapolate", "cosine", "warmup", "optimizer", "superset"]
+    at.session_state["input_text"] = " ".join(f"We use a {w} here." for w in words)
+    at.run()
+    out = "\n".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
+    assert "어려운 단어표 · 12개" in out
+    first_table = out[out.index('class="pp-table pp-gloss"'):]
+    first_table = first_table[:first_table.index("</table>")]
+    assert first_table.count("<tr>") == 1 + 8                       # 머리글 + 처음 8개
+    assert any(e.label.startswith("전체 단어표 보기 · 12개") for e in at.expander)
+    assert out.index("탐지된 약어") < out.index("어려운 단어표 · ")      # 근거 카드가 단어표 위
+    assert "<td>-</td>" not in first_table                          # 빈 칸은 '-' 대신 비움

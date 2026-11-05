@@ -98,3 +98,12 @@ def test_person_and_model_names_are_kept_out_of_the_glossary():
     assert "RAG" in terms and {"softmax", "heuristic"} <= terms     # 풀네임 있는 약어, 전문용어는 그대로
     names = G.proper_names(a)
     assert "ImageNet" in names and "ResNet" in names and "McCann" not in names and "LeCun" not in names
+
+
+def test_word_forms_merge_but_acronyms_stay_apart():
+    a = analyze("We annotate the corpus. Later we kept annotating more data. Workers annotated it. "
+                "The annotation is noisy.")
+    rows = G.build(a)
+    assert [(e.term, e.count, e.first_sentence) for e in rows] == [("annotate", 4, 1)]
+    a = analyze("Named entity recognition (NER) finds named entities (NE). NER is hard.")
+    assert {e.term for e in G.build(a)} == {"NER", "NE"}           # 서로 다른 약어는 합치지 않는다

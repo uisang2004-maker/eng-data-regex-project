@@ -35,6 +35,7 @@ MODES = ("논문 PDF", "arXiv ID", "텍스트 붙여 넣기")
 M_PDF, M_ARXIV, M_PASTE = MODES
 MAX_PASTE = 20000
 MAX_PDF_MB = 20
+GLOSS_PREVIEW = 8                    # 단어표는 처음 8개만 보이고 나머지는 '전체 단어표 보기'로
 TIMES = re.compile(r"(\d+)번")      # 반복 용어 표시 설명에서 등장 횟수
 READ_MODES = ("side", "pair", "en", "ko")      # 읽기 모드: 한영 나란히 / 문장마다 한영 / 원문만 / 한국어만
 READ_MODE_LABEL = {"side": "한영 나란히", "pair": "문장마다 한영", "en": "영어 원문만", "ko": "한국어만"}
@@ -202,7 +203,10 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-reader-head { padding:12px 16px; border-bottom:1px solid #edf0f4; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
 .pp-reader-title { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:780; color:var(--ink); }
 .pp-lang { background:#eff4f8; border-radius:5px; color:#60758b; padding:4px 7px; font-size:10.5px; font-weight:800; letter-spacing:.35px; }
-.pp-meta { color:#60758a; font-size:12px; }
+.pp-meta { color:#4f6478; font-size:12px; }
+.pp-names-label { font-size:12.5px; font-weight:750; color:#2c4560; }
+.pp-names .pp-chips { justify-content:flex-start; }
+[data-testid="stCaptionContainer"] { color:#4f6478 !important; }
 .pp-sents { padding:8px 16px 10px; }
 .pp-sent { display:grid; grid-template-columns:24px 1fr; gap:10px; padding:9px 0; border-bottom:1px solid #f0f3f6; }
 .pp-sent:last-child { border-bottom:0; }
@@ -886,8 +890,9 @@ def names_line(a, rows) -> str:
         return ""
     chips = "".join(f'<span class="pp-chip gray">{esc(n)}</span>' for n in names[:30])
     more = f' <span class="pp-meta">외 {len(names) - 30}개</span>' if len(names) > 30 else ""
-    return (f'<div class="pp-names"><span class="pp-meta">이 글에 나온 모델·데이터셋·기관 이름 · 용어가 아니라 이름이라 '
-            f'단어표에서 뺐어요</span><div class="pp-chips" style="margin-top:4px">{chips}{more}</div></div>')
+    return (f'<div class="pp-names"><span class="pp-names-label">모델·데이터셋·기관 이름</span>'
+            f'<span class="pp-meta"> · 뜻을 풀 용어가 아니라 이름이라 단어표에서 뺐어요</span>'
+            f'<div class="pp-chips" style="margin-top:4px">{chips}{more}</div></div>')
 
 
 def glossary_table(rows) -> str:
@@ -896,12 +901,16 @@ def glossary_table(rows) -> str:
         return '<div class="pp-meta">이 글에서 어려운 단어(전문용어)를 찾지 못했어요.</div>'
     body = "".join(
         f"<tr><td><b>{esc(e.term)}</b></td><td>{esc(', '.join(G.KIND_LABEL[k] for k in e.kinds))}</td>"
-        f"<td>{esc(e.level) or '-'}</td>"
-        f"<td>{e.count}</td><td>{('문장 ' + str(e.first_sentence)) if e.first_sentence else '-'}</td>"
-        f"<td>{esc(e.explanation) or '-'}</td><td>{esc(e.korean) or '-'}</td>"
-        + (f'<td class="pp-ai">{esc(e.ai_meaning) or "-"}</td>' if ai else "") + "</tr>" for e in rows)
+        f"<td>{esc(e.level)}</td>"
+        f"<td>{e.count}</td><td>{('문장 ' + str(e.first_sentence)) if e.first_sentence else ''}</td>"
+        f"<td>{esc(e.explanation)}</td><td>{esc(e.korean)}</td>"
+        + (f'<td class="pp-ai">{esc(e.ai_meaning)}</td>' if ai else "") + "</tr>" for e in rows)
     ai_head = '<th>AI 풀이 <span class="pp-ai-badge">참고용</span></th>' if ai else ""
-    return (f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-gloss"><thead><tr>'
+    # 짧은 칸(종류·난이도·횟수·위치)은 좁게, 설명·뜻 칸은 넓게. 값이 없는 칸은 '-' 대신 비운다(열 이름과 헷갈리지 않게)
+    cols = ('<colgroup><col style="width:16%"><col style="width:10%"><col style="width:6%"><col style="width:6%">'
+            '<col style="width:9%"><col style="width:23%"><col style="width:12%">'
+            + ('<col style="width:18%">' if ai else "") + '</colgroup>')
+    return (f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-gloss">{cols}<thead><tr>'
             f'<th>용어</th><th>종류</th><th>난이도</th><th>횟수</th><th>처음 나온 곳</th><th>풀네임·설명(원문)</th><th>한국어</th>'
             f'{ai_head}</tr></thead><tbody>{body}</tbody></table></div>')
 
@@ -1528,6 +1537,7 @@ def reading_page() -> None:
     tr = ss.translations.get((text_key(a.text), True))
     st.markdown('<div class="pp-sub-title">논문 흐름도</div>', unsafe_allow_html=True)
     st.markdown(flow_map(a, tr), unsafe_allow_html=True)
+    evidence_cards(a)
     rows = G.build(a, G.korean_marks(tr))
     meanings = ss.ai_gloss.get(text_key(a.text))
     if meanings:
@@ -1545,13 +1555,24 @@ def reading_page() -> None:
                        key="glossary_csv", disabled=not rows, use_container_width=True)
     if ss.get("ai_gloss_error"):
         st.warning(ss.ai_gloss_error)
-    st.markdown(glossary_table(rows), unsafe_allow_html=True)
+    st.caption("한국어로 옮겨도 뜻이 바로 안 풀릴 전문용어만 모았어요. 한국어·AI 풀이는 참고용이에요.",
+               help="고르는 기준: 일상 영어에서 아주 드문 말(wordfreq Zipf 3.0 미만, 자주 나오는 말은 3.5 미만), 글 안에 풀네임이 "
+                    "있는 약어. 흔한 말에 접사가 붙은 말(unlabeled, bidirectional)·부사·사람 이름(et al. 같은 인용 표시가 붙는 말)·"
+                    "수식 기호는 뺐어요. 같은 낱말의 어형(annotate·annotating)은 한 줄로 묶고 횟수를 합쳐요. "
+                    f"'한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이예요(AI 풀이는 {MAX_TERMS}개까지).")
+    st.markdown(glossary_table(rows[:GLOSS_PREVIEW]), unsafe_allow_html=True)
+    if len(rows) > GLOSS_PREVIEW:
+        with st.expander(f"전체 단어표 보기 · {len(rows)}개"):
+            st.markdown(glossary_table(rows), unsafe_allow_html=True)
     st.markdown(names_line(a, rows), unsafe_allow_html=True)
-    st.caption("한국어로 옮겨도 뜻이 바로 안 풀릴 전문용어만 골랐어요: 일상 영어에서 아주 드문 말(wordfreq Zipf 3.0 미만, "
-               "자주 나오는 말은 3.5 미만), 글 안에 풀네임이 있는 약어, 글 안에 설명이 있는 이름. 흔한 말에 접사가 붙은 말"
-               "(unlabeled, bidirectional)·부사·사람 이름(et al. 등 인용 표시가 붙는 말)은 뺐고, 모델·데이터셋 이름은 표 아래에 따로 모았어요. '한국어'는 번역기가 옮긴 대응어, 'AI 풀이'는 Claude Haiku가 쓴 뜻풀이로 "
-               f"둘 다 참고용이에요(AI 풀이는 {MAX_TERMS}개까지).")
 
+    st.markdown('<div class="pp-foot"><span><strong>읽는 길은 정규식이, 판단은 학생이.</strong> '
+                '원문은 수정하거나 요약문으로 대체하지 않습니다.</span><span>번역은 버튼을 누를 때만 · 외부 서비스 전송 안내 포함</span></div>',
+                unsafe_allow_html=True)
+
+
+def evidence_cards(a) -> None:
+    """탐지된 약어·규칙 근거 카드(단어표 위). 버튼은 아이콘을 붙여 눌러지는 것임을 분명히 한다."""
     b1, b2 = st.columns(2)
     defined = {k: v for k, v in a.acronyms.items() if v}
     first = next(iter(defined.items()), None)
@@ -1562,7 +1583,7 @@ def reading_page() -> None:
                     f'<div class="pp-mini-title">탐지된 약어 {len(a.acronyms)}개 {snip}</div>'
                     f'<div class="pp-mini-desc">괄호 안 약어 후보를 찾고, 앞 단어의 첫 글자를 맞춰 풀네임을 확인합니다.</div>'
                     f'</div></div>', unsafe_allow_html=True)
-        with m2.popover("정의 확인", use_container_width=True):
+        with m2.popover("정의 확인", icon=":material/menu_book:", use_container_width=True):
             if a.acronyms:
                 st.markdown("\n".join(f"- **{k}** → {v if v else '정의를 찾지 못함'}" for k, v in a.acronyms.items()))
             else:
@@ -1573,11 +1594,8 @@ def reading_page() -> None:
                     f'<div class="pp-mini-title">규칙 근거 <span class="pp-snip">may / might / could</span></div>'
                     f'<div class="pp-mini-desc">추측·가능성 표현을 한 등급으로 표시하고, 가능·허용 의미는 제외합니다.</div>'
                     f'</div></div>', unsafe_allow_html=True)
-        m2.button("규칙 보기", key="to_rules", on_click=go_page, args=("규칙 탐색",), use_container_width=True)
-
-    st.markdown('<div class="pp-foot"><span><strong>읽는 길은 정규식이, 판단은 학생이.</strong> '
-                '원문은 수정하거나 요약문으로 대체하지 않습니다.</span><span>번역은 버튼을 누를 때만 · 외부 서비스 전송 안내 포함</span></div>',
-                unsafe_allow_html=True)
+        m2.button("규칙 보기", key="to_rules", on_click=go_page, args=("규칙 탐색",), icon=":material/rule:",
+                  use_container_width=True)
 
 
 # ================================================================ 규칙 탐색
