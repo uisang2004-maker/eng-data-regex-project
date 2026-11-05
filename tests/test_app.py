@@ -69,7 +69,7 @@ def test_rules_survive_hiding_steps_panel(at):
     at.checkbox(key="rule_REFERENCE").uncheck().run()
     at.toggle(key="show_steps").set_value(False).run()
     assert "REFERENCE" not in at.session_state["active_rules"]
-    assert "참조 0" in md_text(at)
+    assert 'pp-chip violet">참조' not in md_text(at)          # 0개가 된 표시는 칩을 숨긴다
 
 
 def test_translation_result_survives_rule_toggle(at):
@@ -343,5 +343,15 @@ def test_glossary_preview_and_cards_above(at):
     first_table = first_table[:first_table.index("</table>")]
     assert first_table.count("<tr>") == 1 + 8                       # 머리글 + 처음 8개
     assert any(e.label.startswith("전체 단어표 보기 · 12개") for e in at.expander)
-    assert out.index("탐지된 약어") < out.index("어려운 단어표 · ")      # 근거 카드가 단어표 위
+    assert [t.label for t in at.tabs][:3] == ["논문 흐름도", "어려운 단어 12", "약어·규칙 근거 0"]   # 03은 탭으로
     assert "<td>-</td>" not in first_table                          # 빈 칸은 '-' 대신 비움
+
+
+
+def test_missing_problem_card_explains_and_zero_chips_hidden(at):
+    at.session_state["input_text"] = ("We introduce a new model called Foo for parsing. It parses fast. "
+                                      "Results show that Foo improves accuracy by 3%.")
+    at.run()
+    out = "\n".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
+    assert "첫 문장부터 바로 방법을 소개해요" in out and "지어낸 문장으로 채우지 않아요" in out
+    assert "추측·가능성 0" not in out
