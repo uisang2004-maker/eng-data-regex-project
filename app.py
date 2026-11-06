@@ -295,6 +295,17 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-m:hover > .pp-pop, .pp-m:focus > .pp-pop { display:block; }
 @media (hover: none) { .pp-pop { display:none !important; } }
 
+/* 읽기 모드: 한영 나란히(문장 짝마다 한 행) */
+.pp-side-head, .pp-side-row { display:grid; grid-template-columns:30px minmax(0,1.1fr) minmax(0,.95fr); gap:0 18px; }
+.pp-side-head { padding:10px 14px; border-bottom:1px solid var(--line); align-items:center; }
+.pp-side-row { padding:10px 14px; border-bottom:1px solid #eef2f6; align-items:start; }
+.pp-side-ko { color:#34485f; border-left:2px solid #e3ebf4; padding-left:14px; }
+@media (max-width: 760px) {
+  .pp-side-head { display:none; }
+  .pp-side-row { grid-template-columns:26px minmax(0,1fr); }
+  .pp-side-ko { grid-column:2; border-left:0; padding-left:0; margin-top:6px; padding-top:6px; border-top:1px dashed #dbe5ef; }
+}
+
 /* 읽기 모드: 문장마다 한영 */
 .pp-pair-ko { display:flex; gap:8px; align-items:baseline; margin-top:6px; padding:6px 10px; background:#f6f9fc;
   border-left:3px solid #9fbbd2; border-radius:6px; color:#34485f; }
@@ -306,6 +317,7 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-ai-badge { font-size:10.5px; font-weight:700; color:#6b5a9e; background:#f1edf9; border-radius:5px; padding:1px 5px; }
 
 /* 자료를 넣은 뒤 위쪽 막대 */
+[data-testid="stLayoutWrapper"]:has(> .st-key-loaded_bar) { position:sticky; top:0; z-index:40; }  /* 막대를 감싼 칸이 막대와 높이가 같아 그 바깥에 붙인다 */
 .st-key-loaded_bar { background:var(--surface); border:1px solid var(--line); border-left:3px solid #4f86ad;
   border-radius:12px; padding:8px 14px; box-shadow:var(--shadow); }
 .pp-loaded { font-size:13.5px; color:#2c4560; }
@@ -438,10 +450,13 @@ def set_show_input(on: bool) -> None:
     st.session_state.input_error = None
 
 
-def loaded_bar() -> None:
-    """자료를 넣은 뒤에는 입력 칸 대신 지금 읽는 자료와 '다시 넣기' 버튼만 보인다."""
+def loaded_bar(a) -> None:
+    """자료를 넣은 뒤 맨 위에 붙어 있는 막대: 지금 읽는 자료, 읽기 도우미, 결과 파일, 다시 넣기.
+    스크롤해도 따라오므로 읽는 도중에 약어·어려운 단어를 바로 펼쳐 볼 수 있다."""
     with st.container(key="loaded_bar"):
-        c1, c3, c2 = st.columns([4.2, 1.3, 1], vertical_alignment="center")
+        c1, c4, c3, c2 = st.columns([3.4, 1.15, 1.3, 1], vertical_alignment="center")
+        with c4.popover("읽기 도우미", icon=":material/menu_book:", use_container_width=True):
+            reading_helper(a)
         c1.markdown(f'<div class="pp-loaded"><span class="pp-loaded-label">지금 읽는 자료</span>'
                     f'{esc(source_flag())}</div>', unsafe_allow_html=True)
         ss = st.session_state
@@ -452,6 +467,31 @@ def loaded_bar() -> None:
                            help="번역·뜻 풀이 결과를 파일로 받아요. 다른 PC에서 '결과 파일 불러오기'로 넣으면 다시 번역하지 않아요.")
         c2.button("다시 넣기", key="reinput_btn", icon=":material/upload_file:", use_container_width=True,
                   on_click=set_show_input, args=(True,), help="다른 PDF·arXiv ID·텍스트를 넣어요")
+
+
+def reading_helper(a) -> None:
+    """읽기 도우미(고정 막대의 팝오버): 이 글의 약어와 어려운 단어 상위 8개를 뜻과 함께."""
+    ss = st.session_state
+    tr = ss.translations.get((text_key(a.text), True))
+    rows = G.build(a, G.korean_marks(tr))
+    meanings = ss.ai_gloss.get(text_key(a.text))
+    if meanings:
+        G.apply_ai(rows, meanings)
+    st.markdown("**약어**")
+    if a.acronyms:
+        st.markdown("\n".join(f"- **{k}** → {v or '이 글에서 정의를 찾지 못함'}" for k, v in a.acronyms.items()))
+    else:
+        st.caption("이 글에는 약어가 없어요.")
+    st.markdown(f"**어려운 단어** · {len(rows)}개")
+    if rows:
+        lines = []
+        for e in rows[:GLOSS_PREVIEW]:
+            mean = e.ai_meaning or (e.explanation if e.explanation and "정의를 찾지" not in e.explanation else "") or e.korean
+            lines.append(f"- **{e.term}**" + (f" — {mean}" if mean else ""))
+        st.markdown("\n".join(lines))
+        st.caption("전체 목록은 아래 '03 이해를 돕는 자료 → 어려운 단어' 탭에 있어요. 뜻은 참고용이에요.")
+    else:
+        st.caption("이 글에는 한국어로 옮겨도 안 풀릴 전문용어가 없어요.")
 
 
 def saved_panel() -> None:
@@ -1351,6 +1391,28 @@ def float_pop(phrase: str, sent_idx: int | None, ctx) -> tuple[str, str]:
     return "", ""
 
 
+def side_panel(a) -> None:
+    """한영 나란히: 문장 짝마다 한 행(왼쪽 영어, 오른쪽 한국어). 두 칸을 따로 그리면 줄 수 차이가 쌓여
+    뒤쪽 문장이 어긋나므로 행 단위로 묶는다. 표·그림 카드는 그 문장 짝 아래에 한 번."""
+    ss = st.session_state
+    res = current_translation(a)
+    off = ss.translations.get((text_key(a.text), False))
+    uls = card_underlines(a)
+    ctx = cur_float_ctx(a)
+    ko_head = ("한국어 번역" if res else
+               ("번역을 껐어요" if not ss.show_translation else "위의 번역하기를 누르면 여기에 붙어요"))
+    rows = [f'<div class="pp-side-row"><div class="pp-no">{s.idx + 1}</div>'
+            f'<div class="pp-side-en">{en_html(a, s, uls)}</div>'
+            f'<div class="pp-side-ko">{ko_html(res, s.idx, a, off) if res and s.idx < len(res.ko) else ""}</div></div>'
+            f'{float_cards(s.idx, ctx)}' for s in a.sentences]
+    st.markdown(f'<div class="pp-panel"><div class="pp-side-head"><div></div>'
+                f'<div class="pp-reader-title"><span class="pp-lang">EN</span>영어 원문 '
+                f'<span class="pp-meta">· {len(a.sentences)}문장</span></div>'
+                f'<div class="pp-reader-title"><span class="pp-lang">KO</span><span class="pp-meta">{esc(ko_head)}</span></div>'
+                f'</div><div class="pp-sents">{"".join(rows) or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>',
+                unsafe_allow_html=True)
+
+
 def interleaved_panel(a) -> None:
     """문장마다 한영: 영어 문장 바로 아래에 그 문장의 한국어 번역."""
     ss = st.session_state
@@ -1370,7 +1432,7 @@ def interleaved_panel(a) -> None:
                 f'{note}</div></div><div class="pp-sents">{"".join(rows)}</div></div>', unsafe_allow_html=True)
 
 
-def translation_panel(a, rows_on: bool = True, floats_on: bool = False) -> None:
+def translation_panel(a, rows_on: bool = True, floats_on: bool = False, where: str = "") -> None:
     """한국어 번역 칸. rows_on=False면 번역 문장 없이 버튼·안내·사용량만(문장마다 한영 모드).
     floats_on이면(한국어만 모드) 표·그림을 처음 언급한 문장 아래에 끼운다."""
     ss = st.session_state
@@ -1425,7 +1487,7 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False) -> None:
                     + (float_cards(i, ctx, ko=True) if floats_on else "") for i in range(len(res.ko))]
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         elif res.ko is not None:
-            st.markdown('<div class="pp-meta">번역 문장은 위 원문 문장마다 바로 아래에 붙었어요.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="pp-meta">번역 문장은 {where} 보여요.</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)
 
@@ -1444,9 +1506,10 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False) -> None:
                     f"{(' (' + ', '.join(lost_off[:5]) + ')') if lost_off else ''} · 번역이 달라진 문장 {diff}개. "
                     "차이가 작을 수 있어요(검증 결과 탭의 30편 실측 참고).")
         lim = usage.LIMITS[engine()[0]]
-        st.caption(f"번역 {ss.deepl_calls}/{lim.per_session}회",
-                   help=f"이 화면에서 번역을 {lim.per_session}번까지 쓸 수 있어요. 오늘 사이트 전체 {usage.used_today():,}/"
-                        f"{lim.daily:,}자 사용. 긴 글은 {lim.per_request:,}자씩 나눠 동시에 번역해요.")
+        if ss.deepl_calls >= lim.per_session * 0.8:     # 평소에는 숨기고 한도에 가까울 때만 알린다
+            st.caption(f"번역 {ss.deepl_calls}/{lim.per_session}회",
+                       help=f"이 화면에서 번역을 {lim.per_session}번까지 쓸 수 있어요. 오늘 사이트 전체 {usage.used_today():,}/"
+                            f"{lim.daily:,}자 사용. 긴 글은 {lim.per_request:,}자씩 나눠 동시에 번역해요.")
 
 
 def hero() -> None:
@@ -1475,20 +1538,16 @@ def reading_page() -> None:
     ss = st.session_state
     if ss.show_input or not ss.input_text:
         hero()                             # 첫 화면·다시 넣기: 큰 히어로
-    else:                                  # 자료를 넣은 뒤: 본문이 밀리지 않게 한 줄 제목만
-        st.markdown(f'<div class="pp-intro"><div><div class="pp-eyebrow">ACADEMIC READING WORKSPACE</div>'
-                    f'<h1 class="pp-h1">논문을 읽는 길을 더 쉽게 만들어 드려요.</h1></div>'
-                    f'<div class="pp-flag">{ICON["info"]}{esc(source_flag())}</div></div>', unsafe_allow_html=True)
-    if ss.show_input or not ss.input_text:
         input_panel()
         if not ss.input_text:
             empty_guide()
         return                             # 입력 칸이 열려 있는 동안은 결과 창을 숨긴다
-    loaded_bar()
+
+    # 자료를 넣은 뒤: 큰 제목 없이, 스크롤해도 위에 붙어 있는 막대 하나(읽기 도우미·결과 파일·다시 넣기)
+    a = analyze(ss.input_text, frozenset(ss.active_rules))
+    loaded_bar(a)
     if ss.paper is not None and ss.source["kind"] == "pdf":
         paper_overview(ss.paper)
-
-    a = analyze(ss.input_text, frozenset(ss.active_rules))
     ss.term_tips = {text_key(a.text): term_meanings(a, ss.translations.get((text_key(a.text), True)))}
     floats, first = float_context(a)
     ss.float_ctx = {text_key(a.text): (floats, first, {s.start: s.idx for s in a.sentences})}
@@ -1534,13 +1593,11 @@ def reading_page() -> None:
                 f'<div class="pp-meta">표현에 마우스를 올리거나 Tab으로 이동하면 정의와 규칙이 보여요</div></div>'
                 f'<div class="pp-sents">{rows or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>')
     if mode == "side":
-        left, right = st.columns([1.13, 0.87])
-        left.markdown(en_panel, unsafe_allow_html=True)
-        with right:
-            translation_panel(a, floats_on=True)       # 한국어 번역 쪽에도 같은 문장 아래에 표·그림
+        translation_panel(a, rows_on=False, where="아래에서 영어 문장과 한 줄씩 나란히")
+        side_panel(a)                      # 문장 짝마다 한 행: 영어·한국어 높이가 같이 늘어 끝까지 어긋나지 않는다
     elif mode == "pair":
         interleaved_panel(a)
-        translation_panel(a, rows_on=False)
+        translation_panel(a, rows_on=False, where="위 원문 문장마다 바로 아래에")
     elif mode == "en":
         st.markdown(en_panel, unsafe_allow_html=True)
     else:

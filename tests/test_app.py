@@ -211,7 +211,8 @@ def test_reading_modes(at):
         return "\n".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
 
     side = view("side")
-    assert "영어 원문" in side and 'class="pp-sent pp-ko"' in side
+    assert "영어 원문" in side and side.count('class="pp-side-row"') == len(a.sentences)   # 문장 짝마다 한 행
+    assert 'class="pp-side-ko"><div class="pp-text">번역 0' in side
     pair = view("pair")
     assert pair.count('class="pp-pair-ko"') == len(a.sentences) and 'class="pp-sent pp-ko"' not in pair
     en = view("en")
@@ -294,11 +295,11 @@ def test_tables_also_appear_in_korean_translation(at):
     ko = ["모델을 설명한다.", "결과는 표 1에 있다.", "향상이 크다."]
     at.session_state["translations"] = {(tk, True): TranslationResult(ko=ko, mode="aligned", ko_marks=[[], [], []],
                                                                       protected=[[], [], []])}
-    for mode, n in (("side", 2), ("ko", 1), ("en", 1), ("pair", 1)):
+    for mode, n in (("side", 1), ("ko", 1), ("en", 1), ("pair", 1)):
         at.session_state["read_mode"] = mode
         at.run()
         out = "\n".join(m.value for m in at.markdown)
-        assert out.count('class="pp-float"') == n, mode          # 나란히 보기는 영어·한국어 쪽 둘 다
+        assert out.count('class="pp-float"') == n, mode          # 나란히 보기는 문장 짝 아래에 한 번
     at.session_state["read_mode"] = "ko"
     at.run()
     assert "<b>표 1</b>" in "\n".join(m.value for m in at.markdown)
@@ -355,3 +356,10 @@ def test_missing_problem_card_explains_and_zero_chips_hidden(at):
     out = "\n".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
     assert "첫 문장부터 바로 방법을 소개해요" in out and "지어낸 문장으로 채우지 않아요" in out
     assert "추측·가능성 0" not in out
+
+
+def test_reading_helper_in_sticky_bar(at):
+    assert at.get("popover")                                          # 고정 막대의 '읽기 도우미' 팝오버
+    out = "\n".join(m.value for m in at.markdown)
+    assert "**RAG** → Retrieval-augmented generation" in out           # 팝오버 안 약어 목록
+    assert "pp-intro" not in out or "ACADEMIC READING WORKSPACE" not in out.split("pp-loaded")[0]
