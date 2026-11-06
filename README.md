@@ -133,3 +133,8 @@ arXiv cs.CL 초록을 연도별(2012·2015·2018·2021·2024·2025) 50편씩 받
 - **Claude Code(Anthropic):** 기획 문서 초안, 정규식·코드·테스트 작성 보조에 사용했습니다. 모든 결정과 컨펌은 이의상이 했고, 테스트는 실제로 실행한 결과만 기록했습니다.
 - **Claude Haiku 5.5(Anthropic API) / DeepL API Free:** 화면의 선택 기능인 영→한 번역과, 단어표의 선택 기능인 'AI 풀이(참고용)'에만 사용합니다. 3줄 뼈대·형광펜·밑줄·흐름도와 단어표에 넣을 단어 선정은 모두 정규식 결과이고 AI가 만들지 않습니다.
 - 화면 디자인(v03)은 별도로 만든 디자인 인계 자료(`docs/design/paperpath-v03`)를 기준으로 구현했습니다.
+
+## 라이선스
+
+- 코드는 [MIT 라이선스](LICENSE)를 따릅니다.
+- 함께 담긴 데이터는 각자 원래 라이선스를 따릅니다: `data/processed/en_word_zipf.tsv`는 wordfreq 데이터(CC BY-SA 4.0), 샘플 초록(`data/processed/sample_abstracts.jsonl`)은 arXiv API 메타데이터(CC0)입니다. 첫 화면 이미지(`static/hero.jpg`)는 이의상이 만든 이미지입니다.
