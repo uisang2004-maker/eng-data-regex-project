@@ -157,9 +157,15 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
     keep = caps_words([ln.lstrip(MARKS) for ln in lines])
     # 굵은 글꼴 단서: 본문보다 큰 굵은 줄이 있으면 그게 절, 본문 크기 굵은 줄은 소제목.
     # 굵은 줄이 모두 같은 크기면 흔한 절 이름(SEC_STD_TOP)으로 시작하는 줄이 절, 나머지는 소제목("std")
-    has_head = any(ln.startswith(HEAD_MARK) for ln in lines)
+    # 흔한 절 이름(Abstract·Introduction…) 줄이 있으면 그 앞의 제목 글꼴 줄(제목·저자·표지)은 절로 받지 않고,
+    # 단계(큰 제목 줄이 있는지)도 그 뒤 줄로만 판단한다
+    names = [i for i, ln in enumerate(lines)
+             if P.SEC_NAMED_HEAD.match(ln.lstrip(MARKS).strip()) or P.SEC_STD_TOP.match(ln.lstrip(MARKS).strip())]
+    anchored = use_font and bool(names)
+    body_lines = lines[names[0]:] if anchored else lines
+    has_head = any(ln.startswith(HEAD_MARK) for ln in body_lines)
     font_of = {HEAD_MARK: "top", SUB_MARK: "sub" if has_head else "std"} if use_font else {}
-    std_heads = sum(bool(P.SEC_STD_TOP.match(ln.lstrip(MARKS).strip())) for ln in lines
+    std_heads = sum(bool(P.SEC_STD_TOP.match(ln.lstrip(MARKS).strip())) for ln in body_lines
                     if ln[:1] in (HEAD_MARK, SUB_MARK))
     title_key = re.sub(r"\s+", " ", title).strip().lower()
 
@@ -181,6 +187,8 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
         if font == "std":
             std = bool(P.SEC_STD_TOP.match(line))
             font = "top" if std or std_heads < 2 else ("sub" if sections else "")   # 첫 절 앞(제목·부제)은 버린다
+        if font and anchored and not sections and not P.SEC_STD_TOP.match(line):
+            font = ""
         m = P.SEC_INLINE_ABSTRACT.match(line)
         if m and not sections:                   # 'Abstract—본문'처럼 같은 줄에서 시작하는 초록
             end_para()

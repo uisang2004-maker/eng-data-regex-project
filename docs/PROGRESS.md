@@ -605,3 +605,21 @@
    - Bradley Methods 소제목 8개 → **4개**(Setting for Child One · Observation of Child One · Setting for Child Two · Observation of Child Two). 머리글 글자는 관찰표 내용으로 본문에 남음(+89자)
    - 나머지 9편(기존 7편·Elden·Newman): 절·소제목·추출 텍스트가 변경 전과 같음(스냅샷 비교, 바뀐 곳은 Bradley Methods 2줄뿐)
    - `py -I -m pytest` **224 passed**. 새 테스트는 표 머리글 규칙을 끄면 실패하는 것을 확인함
+
+### 2026-11-07 (42) — 이름이 가려진 제목 글꼴·문장형 제목·내어 쓴 제목(Nature Protocols)
+
+1. 문제: 이의상 님이 넣은 Brodkorb et al.(2019, Nature Protocols, HAL 판 25쪽)이 여전히 "Introduction" 한 절(약 60,700자)로만 나옴
+2. 원인(글꼴 실측)
+   - 제목 글꼴 이름이 `AdvOT5777b7ad`처럼 가려져 있어 이름에 Bold가 없음 → 굵은 글꼴 규칙에 안 걸림
+   - 제목이 문장형(`Development of the protocol`)이라 낱말마다 대문자인 제목 정규식에 안 맞음
+   - 절과 소제목이 같은 글꼴·같은 10pt. 단계는 **들여쓰기**로만 구분됨: 절(Introduction·Materials·Procedure…)은 x=51로 본문보다 왼쪽에 내어 쓰고, 소제목(Reagents 등)은 본문 줄(x≈160)에 맞춤
+   - 쪽마다 `PROTOCOL` 머리글이 찍힘
+3. 구현
+   - `src/pdf_text.py`: 제목 글꼴 = 이름에 Bold가 든 글꼴, **또는** 본문 크기 이상인 줄이 3개 이상이고 그중 75% 이상이 12낱말 이하인 글꼴(기울이기만 한 글꼴·본문 글꼴 제외). 여러 쪽에 똑같이 찍힌 줄(2쪽 이상·절반 이상의 쪽)은 제목 후보에서 뺌. 제목이 본문 줄 왼쪽 끝보다 20pt 이상 왼쪽에서 시작하는 것과 아닌 것이 각각 2개 이상이면 **내어 쓴 줄이 절, 나머지가 소제목**(본문 왼쪽 끝 = 본문 긴 줄 시작 x 중 25% 이상이 모인 가장 왼쪽 묶음이라, 2단 논문은 어느 단의 제목도 내어 쓴 줄이 되지 않음)
+   - `src/patterns.py`: `SEC_FONT_HEAD`를 문장형 제목까지 받도록 넓힘(대문자로 시작, 글자 낱말만, 숫자·끝 문장부호 없음). 제목 글꼴 줄에만 대 보므로 일반 본문 줄에는 쓰이지 않음
+   - `src/sections.py`: 흔한 절 이름 줄(Abstract·Introduction 등)이 있으면 그 앞 제목 글꼴 줄(표지·제목·저자)은 절로 받지 않고, 단계 판단(큰 제목 줄이 있는지)도 그 뒤 줄로만 함(Newman 표지의 큰 글자가 단계 판단을 흐리던 것을 막음)
+4. 실행 결과
+   - Brodkorb: 1절 → **6절**(Introduction · Materials · Procedure · Troubleshooting · Timing · Anticipated results), Introduction 아래 소제목 11개(Development of the protocol 등), Materials 아래 11개, Anticipated results 아래 5개. HAL 표지·저자 목록·쪽 머리글은 들어가지 않음
+   - 나머지 10편(기존 7편·Elden·Newman·Bradley): 절·소제목·추출 텍스트가 변경 전과 같음(텍스트 차이는 모두 Brodkorb 안). 중간 시도에서 Newman·Bradley가 표지 글꼴 때문에 3·4절로 줄어드는 회귀를 스냅샷으로 잡아 고침
+   - `py -I -m pytest` **225 passed**(내어 쓴 제목 PDF를 코드로 만들어 절·소제목·머리글 확인, 제목 정규식에 문장형·숫자 섞인 줄 추가)
+   - 한계: Nature Protocols처럼 'Abstract' 표시 없이 시작하는 초록은 앞머리로 보고 버림(초록 쪽이 없음). `Preparation of reagents … Timing 4–5 d`처럼 제목 뒤에 숫자가 붙은 소제목은 받지 않음

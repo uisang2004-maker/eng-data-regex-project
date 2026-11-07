@@ -5,7 +5,9 @@
   왼쪽 단 → 오른쪽 단 순서로 읽는다. 제목·초록처럼 쪽 전체 폭을 쓰는 줄은 그 자리에서 그대로 읽는다.
 - 줄은 글자 아랫선(baseline)으로 묶고, 붙어 있는 낱말 조각(작은 대문자 글꼴의 `I` + `NTRODUCTION`)은 띄우지 않고 잇는다.
 - 줄 사이 간격이 평소보다 크면 빈 줄(문단 경계)을 넣는다. 절 나누기(src/sections.py)는 이 줄들을 정규식으로 본다.
-- 줄 전체가 본문과 다른 굵은 글꼴이면 제목 후보 표시를 붙인다(본문보다 크면 HEAD_MARK, 같으면 SUB_MARK).
+- 줄 전체가 제목 글꼴이면 제목 후보 표시를 붙인다(본문보다 크면 HEAD_MARK, 같으면 SUB_MARK).
+  제목 글꼴 = 이름에 Bold가 든 글꼴, 또는 이름이 가려진 글꼴(AdvOT5777b7ad)이라도 본문 크기 이상에서 짧은 단독 줄로만 쓰이는 글꼴.
+  제목이 본문보다 왼쪽으로 내어 쓰인 형식(Nature Protocols)은 내어 쓴 줄이 절, 본문 줄에 맞춘 줄이 소제목.
   번호 없는 제목(백과사전·인문학 글)을 찾기 위한 단서일 뿐이고, 제목으로 받을지는 sections.py의 정규식이 정한다.
 """
 
@@ -26,6 +28,9 @@ SUB_MARK = "\x1d"         # 본문 크기의 굵은 글꼴 줄(소제목 후보)
 MARKS = SMALL_MARK + HEAD_MARK + SUB_MARK
 HEAD_GAP = 0.5            # 본문보다 이만큼(pt) 이상 크면 절 제목 후보, 아니면 소제목 후보
 BOLD_FONT = re.compile(r"bold|black|heavy|semibold|demi|medi(?:um)?\b|[-_,](?:b|bd|bx|hev)\b|cmbx", re.I)
+ITALIC_FONT = re.compile(r"ital|obli|[-_.](?:i|it|lightit)$", re.I)
+HEAD_FONT_SHORT = 0.75    # 이름에 Bold가 없는 글꼴은 줄의 이만큼 이상이 짧은 단독 줄이어야 제목 글꼴
+OUTDENT = 20.0            # 본문 줄 왼쪽 끝보다 이만큼(pt) 이상 왼쪽에서 시작하면 내어 쓴 제목
 
 
 @dataclass
@@ -78,11 +83,12 @@ def _font(w: dict) -> str:
     return fonts.pop() if len(fonts) == 1 else "?"
 
 
-def _line(ws: list[dict]) -> tuple[float, float, str, float, str]:
-    """(아랫선, 글자 크기 중앙값, 줄 글자, 가장 큰 글자 크기, 줄 전체가 한 글꼴이면 그 이름 아니면 "")."""
+def _line(ws: list[dict], partner: str | None = None) -> tuple:
+    """(아랫선, 글자 크기 중앙값, 줄 글자, 가장 큰 글자 크기, 줄 전체가 한 글꼴이면 그 이름 아니면 "", 왼쪽 끝 x,
+    반대쪽 칸 글꼴). 마지막 값은 쪽 전체 폭 줄이면 None, 가운데 빈틈으로 가른 줄이면 같은 높이 반대쪽 칸의 글꼴("" = 없음)."""
     fonts = {_font(w) for w in ws}
     return (ws[0]["bottom"], median(w["size"] for w in ws), _text(ws), max(w["size"] for w in ws),
-            fonts.pop() if len(fonts) == 1 and "?" not in fonts else "")
+            fonts.pop() if len(fonts) == 1 and "?" not in fonts else "", ws[0]["x0"], partner)
 
 
 def _page_lines(page) -> tuple[list[tuple[float, float, str, float]], bool]:
@@ -115,14 +121,13 @@ def _page_lines(page) -> tuple[list[tuple[float, float, str, float]], bool]:
         left, right = parts
         if left and right:
             split_rows += 1
-            l_line, r_line = _line(left), _line(right)
-            block_l.append(l_line + (r_line[4],))      # 같은 높이 반대쪽 칸의 글꼴(표 머리글 판단용)
-            block_r.append(r_line + (l_line[4],))
+            block_l.append(_line(left, _line(right)[4]))     # 같은 높이 반대쪽 칸의 글꼴(표 머리글 판단용)
+            block_r.append(_line(right, _line(left)[4]))
             continue
         if left:
-            block_l.append(_line(left))
+            block_l.append(_line(left, ""))
         if right:
-            block_r.append(_line(right))
+            block_r.append(_line(right, ""))
     flush()
     return out, split_rows >= 5
 
@@ -148,21 +153,66 @@ def _body_font(pages) -> str:
     return max(count, key=count.get) if count else ""
 
 
-def _head_mark(row, body: float, body_font: str) -> str:
-    """줄 전체가 본문과 다른 굵은 글꼴(굵은 기울임 포함)이고 짧으면 제목 후보 표시.
-    기울이기만 한 글꼴(책 제목 등)은 굵지 않아서 후보가 되지 않는다.
-    같은 높이 반대쪽 칸도 굵은 글꼴이면 표 머리글('Child's Activity | Others Involved')로 보고 표시하지 않는다.
-    2단 논문의 제목은 같은 높이 반대쪽 단이 보통 본문 글꼴이라 걸리지 않는다."""
-    font = row[4]
-    partner = row[5] if len(row) > 5 else ""
-    if (not font or font == body_font or not BOLD_FONT.search(font)
-            or len(row[2].split()) > 12 or row[1] < body - 0.2
-            or (partner and partner != body_font and BOLD_FONT.search(partner))):
-        return ""
-    return HEAD_MARK if row[1] >= body + HEAD_GAP else SUB_MARK
+def _head_fonts(pages, body: float, body_font: str) -> set[str]:
+    """제목 글꼴: 이름에 Bold가 든 글꼴(굵은 기울임 포함), 또는 본문 크기 이상인 줄이 3개 이상이고 그중
+    HEAD_FONT_SHORT 이상이 12낱말 이하인 글꼴. 기울이기만 한 글꼴(책 제목 등)과 본문 글꼴은 뺀다."""
+    lines: dict[str, list[int]] = {}
+    for rows in pages:
+        for r in rows:
+            if r[4] and r[4] != body_font and r[1] >= body - 0.2:
+                lines.setdefault(r[4], []).append(len(r[2].split()))
+    out = set()
+    for font, words in lines.items():
+        if BOLD_FONT.search(font):
+            out.add(font)
+        elif not ITALIC_FONT.search(font) and len(words) >= 3 and sum(n <= 12 for n in words) >= HEAD_FONT_SHORT * len(words):
+            out.add(font)
+    return out
 
 
-def _with_paragraphs(lines: list[tuple], body: float = 0.0, body_font: str = "") -> list[str]:
+def _repeated(pages) -> set[str]:
+    """여러 쪽에 똑같이 찍힌 줄(워터마크·쪽 머리글 'PROTOCOL'): 2쪽 이상, 그리고 절반 이상의 쪽에 나온 글자."""
+    seen: dict[str, int] = {}
+    for rows in pages:
+        for t in {r[2] for r in rows}:
+            seen[t] = seen.get(t, 0) + 1
+    return {t for t, n in seen.items() if len(pages) >= 2 and n >= 2 and n * 2 >= len(pages)}
+
+
+def _body_left(rows, body_font: str) -> float | None:
+    """이 쪽 본문 줄의 왼쪽 끝: 본문 글꼴로 된 긴 줄의 시작 x를 5pt 단위로 묶어, 줄의 25% 이상이 모인 묶음 중
+    가장 왼쪽. 2단 논문은 왼쪽 단이 잡혀서 어느 단의 제목도 '내어 쓴 줄'이 되지 않는다."""
+    xs = [round(r[5] / 5) * 5 for r in rows if r[4] == body_font and len(r[2].split()) >= 6]
+    if not xs:
+        return None
+    return min(x for x in set(xs) if xs.count(x) * 4 >= len(xs))
+
+
+def _head_marks(pages, body: float, body_font: str) -> list[dict[int, str]]:
+    """쪽마다 {줄 번호: HEAD_MARK|SUB_MARK}. 단계는 기본으로 글자 크기(본문보다 크면 절)로 정하고,
+    제목이 본문보다 왼쪽으로 내어 쓰인 형식이면(내어 쓴 제목·안 내어 쓴 제목이 각각 2개 이상) 내어 쓴 줄이 절."""
+    fonts = _head_fonts(pages, body, body_font)
+    rep = _repeated(pages)
+    cands = []                                      # (쪽, 줄, 크기로 정한 표시, 내어 썼는지)
+    for p, rows in enumerate(pages):
+        left = _body_left(rows, body_font)
+        for i, r in enumerate(rows):
+            partner = r[6]
+            if (r[4] not in fonts or r[2] in rep or len(r[2].split()) > 12 or r[1] < body - 0.2
+                    or (partner and partner != body_font and partner in fonts)):
+                continue                            # 반대쪽 칸도 제목 글꼴이면 표 머리글('Child's Activity | Others Involved')
+            by_size = HEAD_MARK if r[1] >= body + HEAD_GAP else SUB_MARK
+            out_dent = left is not None and r[5] < left - OUTDENT
+            cands.append((p, i, by_size, out_dent))
+    n_out = sum(c[3] for c in cands)
+    by_indent = n_out >= 2 and len(cands) - n_out >= 2
+    marks: list[dict[int, str]] = [{} for _ in pages]
+    for p, i, by_size, out_dent in cands:
+        marks[p][i] = (HEAD_MARK if out_dent else SUB_MARK) if by_indent else by_size
+    return marks
+
+
+def _with_paragraphs(lines: list[tuple], body: float = 0.0, marks: dict[int, str] | None = None) -> list[str]:
     """줄 간격이 크거나(문단·제목 앞뒤) 단이 바뀌어 위로 돌아가면 빈 줄을 넣는다."""
     gaps = [b[0] - a[0] for a, b in zip(lines, lines[1:]) if 0 < b[0] - a[0] < 40]
     usual = median(gaps) if gaps else 12.0
@@ -175,7 +225,7 @@ def _with_paragraphs(lines: list[tuple], body: float = 0.0, body_font: str = "")
             if gap < 0 or gap > usual * PARA_GAP_RATIO or abs(size - prev_size) > 0.8:
                 out.append("")
         small = body and size < body - SMALL_GAP
-        out.append((SMALL_MARK if small else _head_mark(row, body, body_font) if body else "") + text)
+        out.append((SMALL_MARK if small else (marks or {}).get(i, "")) + text)
     return out
 
 
@@ -215,9 +265,10 @@ def extract(data: bytes) -> PdfText:
         title = _first_page_title(pages)
         body = _body_size(pages)
         body_font = _body_font(pages)
+        marks = _head_marks(pages, body, body_font)
         lines: list[str] = []
-        for rows in pages:
-            lines += _with_paragraphs(rows, body, body_font)
+        for rows, page_marks in zip(pages, marks):
+            lines += _with_paragraphs(rows, body, page_marks)
             lines.append("")              # 쪽 경계
         meta_title = (pdf.metadata or {}).get("Title") or ""
     if not any(ln.strip(MARKS + " ") for ln in lines):

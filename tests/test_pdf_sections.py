@@ -271,16 +271,18 @@ def test_find_figure_above_caption():
 
 
 def make_font_pdf(pages: list[list[tuple]]) -> bytes:
-    """(x, y, 글자, 글꼴, 크기) 목록: 글꼴 'R'=본문(Times-Roman), 'B'=굵은 제목(Helvetica-Bold)."""
+    """(x, y, 글자, 글꼴, 크기) 목록: 글꼴 'R'=본문(Times-Roman), 'B'=굵은 제목(Helvetica-Bold),
+    'H'=이름에 Bold가 없는 제목 글꼴(Helvetica, 이름이 가려진 출판사 글꼴 대신)."""
     objs = ["<< /Type /Catalog /Pages 2 0 R >>", None,
             "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >>",
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
     kids = []
     for items in pages:
-        body = "".join(f"BT /F{1 if f == 'R' else 2} {s} Tf {x} {y} Td ({t}) Tj ET\n" for x, y, t, f, s in items)
+        body = "".join(f"BT /F{'RBH'.index(f) + 1} {s} Tf {x} {y} Td ({t}) Tj ET\n" for x, y, t, f, s in items)
         objs.append(f"<< /Length {len(body)} >>\nstream\n{body}endstream")
         objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {len(objs)} 0 R "
-                    f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>")
+                    f"/Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> >>")
         kids.append(len(objs))
     objs[1] = f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] /Count {len(kids)} >>"
     out, offs = "%PDF-1.4\n", []
@@ -332,8 +334,8 @@ def test_bold_marks_ignored_when_numbered_sections_exist():
 
 @pytest.mark.parametrize("line,ok", [
     ("Space in the Philosophical Tradition", True), ("Absolute, Relative, and Relational Space", True),
-    ("Smooth versus Striated", True), ("Author's personal copy", False), ("We propose a method.", False),
-    ("Results show gains", False)])
+    ("Smooth versus Striated", True), ("Development of the protocol", True), ("We propose a method.", False),
+    ("Digestion procedure Timing 5 8 h", False)])
 def test_font_head_regex(line, ok):
     assert bool(heading(line, 0, font="top")) == ok
     assert heading(line, 0) is None or line == "Introduction"         # 글꼴 단서가 없으면 받지 않는다
@@ -384,3 +386,26 @@ def test_bold_cells_side_by_side_are_table_header_not_subheads():
     methods = next(s for s in paper.sections if s.title == "Methods")
     assert methods.subheads == ["Setting for Child One"]
     assert "Child Activity" in methods.text                            # 머리글 글자는 표 내용으로 남는다
+
+
+def test_outdented_heads_in_plain_font_are_sections():
+    """Nature Protocols형: 제목 글꼴 이름에 Bold가 없고 크기도 같지만, 본문보다 왼쪽으로 내어 쓴 제목은 절,
+    본문 줄에 맞춘 제목은 소제목. 쪽마다 찍힌 머리글(PROTOCOL)은 제목이 아니다."""
+    say = ["We digest the food sample in three phases with enzymes and salts.",
+           "Each phase runs for two hours at body temperature with mixing."]
+    plan = [("Introduction", 50), ("Development of the protocol", 160), ("Overview of the procedure", 160),
+            ("Materials", 50), ("Reagents", 160), ("Procedure", 50)]
+    pages = []
+    for chunk in (plan[:3], plan[3:]):
+        items = [(450, 770, "PROTOCOL", "H", 14)]
+        y = 730
+        for head, x in chunk:
+            items.append((x, y, head, "H", 10))
+            items += [(160, y - 16 - 13 * k, t, "R", 10) for k, t in enumerate(say)]
+            y -= 70
+        pages.append(items)
+    pdf = extract(make_font_pdf(pages))
+    paper = split_paper(pdf.lines, pdf.title)
+    assert [s.title for s in paper.sections] == ["Introduction", "Materials", "Procedure"]
+    assert paper.sections[0].subheads == ["Development of the protocol", "Overview of the procedure"]
+    assert paper.sections[1].subheads == ["Reagents"]

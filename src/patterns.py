@@ -445,13 +445,11 @@ SEC_NAMED_HEAD = re.compile(
 SEC_END = re.compile(r"^(?:References|Bibliography|Further\s+Reading|Works\s+Cited)$", re.I)
 """여기부터는 참고문헌이라 분석하지 않는다(부록도 함께 뺀다). 백과사전·인문학 글은 Further Reading·Works Cited."""
 
-SEC_FONT_HEAD = re.compile(
-    r"^(?P<title>[A-Z][\w'’-]*(?:(?:,?\s+|:\s+)(?:[A-Z]\.|[A-Z][\w'’-]*|a|an|the|of|and|or|for|to|in|on|with|"
-    r"by|at|via|from|versus|vs\.|as|into|between|beyond))*)$"
-)
-"""번호 없는 절 제목(굵은 글꼴 줄일 때만 대 본다): 낱말마다 대문자로 시작하고(관사·전치사 제외) 문장부호로 끝나지 않는다.
-``Space in the Philosophical Tradition``, ``Absolute, Relative, and Relational Space``. 'Author's personal copy'처럼
-소문자 낱말이 섞인 줄은 받지 않는다. 콜론으로 이은 제목(``Analysis: A Contemporary Focus on Ibram X. Kendi``)도 받는다."""
+SEC_FONT_HEAD = re.compile(r"^(?P<title>[A-Z][A-Za-z'’-]*(?:(?:,?\s+|:\s+)(?:[A-Z]\.|[A-Za-z][A-Za-z'’-]*))*)$")
+"""번호 없는 절 제목(제목 글꼴 줄일 때만 대 본다): 대문자로 시작하고, 글자 낱말로만 되어 있고(숫자 없음) 문장부호로
+끝나지 않는다. ``Space in the Philosophical Tradition``, ``Development of the protocol``(첫 낱말만 대문자),
+``Analysis: A Contemporary Focus on Ibram X. Kendi``(콜론·머리글자). 워터마크처럼 여러 쪽에 반복되는 줄은
+pdf_text가 제목 후보에서 미리 뺀다."""
 
 SEC_STD_TOP = re.compile(
     r"^(?:Abstract|Introduction|Background|Literature\s+Review|Related\s+Work|Methods?|Methodology|"
