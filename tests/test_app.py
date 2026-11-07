@@ -473,3 +473,28 @@ def test_many_parts_use_dropdown(blank):
     assert not any(g.key == "part_pick" for g in at.get("button_group"))
     at.selectbox(key="part_pick").set_value(2).run()
     assert not at.exception and 'class="pp-no">7<' in md_text(at)
+
+
+def test_feedback9_range_rules_and_labels(at):
+    import hashlib
+
+    from src.extract import analyze
+    from src.translate import TranslationResult
+
+    text = md_text(at)
+    assert "· 문장 1–4" in text                                   # 원문 헤더에 지금 읽는 문장 범위
+    assert "규칙 근거" in text and "HEDGE" in text                 # 위쪽 막대 팝오버의 규칙 근거
+    a = analyze(at.session_state["input_text"])
+    key = (hashlib.sha256(a.text.encode("utf-8")).hexdigest()[:16], True)
+    ko = [f"번역 {i}" for i in range(len(a.sentences))]
+    at.session_state["translations"] = {key: TranslationResult(ko=ko, mode="aligned", ko_marks=[[] for _ in ko],
+                                                               protected=[[]] * len(ko))}
+    at.run()
+    assert any(b.key == "compare_btn" and b.label == "보호 없이 번역해 비교" for b in at.button)
+
+
+def test_position_card_text_is_not_faded(at):
+    at.session_state["input_text"] = ("Large models are popular in many fields today. We train a small network on a new corpus. "
+                                      "The network reaches high accuracy on the test set.")
+    at.run()
+    assert 'pp-card' in md_text(at) and ' est"' in md_text(at)    # 위치 추정 카드는 진한 글자 클래스

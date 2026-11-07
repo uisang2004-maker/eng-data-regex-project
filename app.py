@@ -188,6 +188,7 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .teal .pp-kdot { background:#3a9c92; } .violet .pp-kdot { background:#8b79b5; }
 .pp-basis { color:#60758a; font-size:11.5px; white-space:nowrap; }
 .pp-basis.position { color:#9a681d; } .pp-basis.none { color:#8b98a9; }
+.pp-card.est .pp-sk-text { color:#22364d; font-weight:560; }   /* 위치 추정 카드: 형광펜·밑줄이 없어 흐려 보이지 않게 */
 .pp-sk-text { font-size:14px; color:#40536a; line-height:1.65; letter-spacing:-.1px; }
 .pp-sk-no { color:#8090a1; font-size:11.5px; font-weight:750; margin-right:6px; }
 .pp-sk-missing { font-size:14px; color:#8b98a9; }
@@ -500,7 +501,7 @@ def loaded_bar(a) -> None:
     스크롤해도 따라오므로 읽는 도중에 약어·어려운 단어를 바로 펼쳐 볼 수 있다."""
     with st.container(key="loaded_bar"):
         c1, c4, c3, c2 = st.columns([3.4, 1.15, 1.3, 1], vertical_alignment="center")
-        with c4.popover("약어·어려운 단어", icon=":material/menu_book:", use_container_width=True):
+        with c4.popover("약어·단어·규칙", icon=":material/menu_book:", use_container_width=True):
             reading_helper(a)
         c1.markdown(f'<div class="pp-loaded"><span class="pp-loaded-label">지금 읽는 자료</span>'
                     f'{esc(source_flag())}<a class="pp-jump" href="#pp-03">03 자료로 ↓</a></div>', unsafe_allow_html=True)
@@ -515,7 +516,7 @@ def loaded_bar(a) -> None:
 
 
 def reading_helper(a) -> None:
-    """'약어·어려운 단어' 팝오버(고정 막대): 이 글의 약어와 어려운 단어 상위 8개를 뜻과 함께."""
+    """'약어·단어·규칙' 팝오버(고정 막대): 이 글의 약어, 어려운 단어 상위 8개(뜻과 함께), 걸린 규칙 근거."""
     ss = st.session_state
     tr = ss.translations.get((text_key(a.text), True))
     rows = G.build(a, G.korean_marks(tr))
@@ -537,6 +538,25 @@ def reading_helper(a) -> None:
         st.caption("전체 목록은 아래 '03 이해를 돕는 자료 → 어려운 단어' 탭에 있어요. 뜻은 참고용이에요.")
     else:
         st.caption("이 글에는 한국어로 옮겨도 안 풀릴 전문용어가 없어요.")
+    rule_summary(a)
+
+
+def rule_summary(a) -> None:
+    """팝오버의 '규칙 근거': 이 글에서 걸린 표시 종류마다 개수·규칙 이름·예시 표현 두 개(정규식이 찾은 그대로)."""
+    groups: dict[str, list[str]] = {}
+    for m in a.marks:
+        phrase = a.text[m.start:m.end]
+        lst = groups.setdefault(m.category, [])
+        if phrase not in lst:
+            lst.append(phrase)
+    st.markdown(f"**규칙 근거** · {sum(len(v) for v in groups.values())}개 표현")
+    if not groups:
+        st.caption("이 글에서 걸린 규칙이 없어요.")
+        return
+    order = [c for c in MARK_LABEL if c in groups]
+    st.markdown("\n".join(f"- **{MARK_LABEL[c]}** `{CAT_RULE[c]}` · {len(groups[c])}개 — "
+                          + ", ".join(f"_{x[:30]}_" for x in groups[c][:2]) for c in order))
+    st.caption("각 규칙의 정규식·예시·일부러 놓치는 경우는 위 '규칙 탐색' 탭에 있어요.")
 
 
 def saved_panel() -> None:
@@ -981,7 +1001,8 @@ def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
         if ko:
             body += f'<div class="pp-sk-ko">{render_layers(ko, [], ko_ul)}</div>'
         basis = card.label
-    return (f'<div class="pp-panel pp-card {color}"><div class="pp-card-head"><div class="pp-kind">'
+    est = " est" if card.basis == "position" else ""
+    return (f'<div class="pp-panel pp-card {color}{est}"><div class="pp-card-head"><div class="pp-kind">'
             f'<span class="pp-kdot"></span>{title}</div><div class="pp-basis {basis_cls}" title="{esc(basis_tip)}">'
             f'{esc(basis)}</div></div>'
             f'{body}<div class="pp-reason">{ICON["info"]}<span>{esc(reason)}</span></div></div>')
@@ -1815,6 +1836,29 @@ def part_nav_buttons(parts) -> None:
             st.button(f"다음 부분: {parts[k + 1][0]} ▶", key="part_next", on_click=go_part, args=(k + 1,))
 
 
+def range_note(a) -> str:
+    """원문 헤더에 붙일 '지금 읽는 구간': 절 이름 · 문장 범위 · (논문이면) 논문 전체 문장 수."""
+    ss = st.session_state
+    n = len(a.sentences)
+    lo, hi = ss.get("part_range", {}).get(text_key(a.text), (0, n))
+    where = ss.source.get("section", "") if ss.source.get("kind") == "pdf" else ""
+    span = f"문장 {lo + 1}–{hi}" + (f" / 이 글 {n}문장" if (lo, hi) != (0, n) else "")
+    total = paper_sentences(ss.paper) if ss.paper is not None and ss.source.get("kind") == "pdf" else 0
+    parts = [where, span] + ([f"논문 전체 {total}문장"] if total else [])
+    return " · ".join(esc(x) for x in parts if x)
+
+
+def paper_sentences(paper) -> int:
+    """논문 전체 문장 수(초록·본문·결론, 감사의 글 제외). 논문마다 한 번만 센다."""
+    ss = st.session_state
+    key = text_key("\n".join(s.text for s in paper.sections))
+    cache = ss.setdefault("paper_sent_total", {})
+    if key not in cache:
+        cache[key] = sum(len(analyze(paper.sections[i].text).sentences)
+                         for ids in paper_pages(paper).values() for i in ids)
+    return cache[key]
+
+
 def shown(a):
     """지금 보여 줄 문장들(긴 글이면 고른 부분만)."""
     lo, hi = st.session_state.get("part_range", {}).get(text_key(a.text), (0, len(a.sentences)))
@@ -1842,7 +1886,7 @@ def side_panel(a) -> None:
             f'{float_cards(s.idx, ctx)}' for s in shown(a)]
     st.markdown(f'<div class="pp-panel"><div class="pp-side-head"><div></div>'
                 f'<div class="pp-reader-title"><span class="pp-lang">EN</span>영어 원문 '
-                f'<span class="pp-meta">· {len(a.sentences)}문장</span></div>'
+                f'<span class="pp-meta">· {range_note(a)}</span></div>'
                 f'<div class="pp-reader-title"><span class="pp-lang">KO</span><span class="pp-meta">{esc(ko_head)}</span></div>'
                 f'</div><div class="pp-sents">{"".join(rows) or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>',
                 unsafe_allow_html=True)
@@ -1863,7 +1907,7 @@ def interleaved_panel(a) -> None:
                     f'<div class="pp-pair-en">{en_html(a, s, uls)}</div>{ko}</div></div>{float_cards(s.idx, ctx)}')
     note = "" if res else '<span class="pp-meta"> · 위 번역 칸에서 번역하면 문장마다 한국어가 붙어요</span>'
     st.markdown(f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
-                f'<span class="pp-lang">EN·KO</span>문장마다 한영 <span class="pp-meta">· {len(a.sentences)}문장</span>'
+                f'<span class="pp-lang">EN·KO</span>문장마다 한영 <span class="pp-meta">· {range_note(a)}</span>'
                 f'{note}</div></div><div class="pp-sents">{"".join(rows)}</div></div>', unsafe_allow_html=True)
 
 
@@ -1927,7 +1971,8 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False, where: s
             st.markdown(f'<div class="pp-text">{esc(res.paragraph or "")}</div>', unsafe_allow_html=True)
 
         if off is None:
-            if st.button("마스킹 끔과 비교", key="compare_btn", help="보호 마스킹 없이 한 번 더 번역해 차이를 보여 줘요(번역 API 추가 호출)"):
+            if st.button("보호 없이 번역해 비교", key="compare_btn",
+                         help="약어·인용·참조를 지키는 보호 표시(마스킹) 없이 한 번 더 번역해 차이를 보여 줘요(번역 API 추가 호출)"):
                 with st.spinner("마스킹 없이 번역하는 중…"):
                     ss.translations[(tkey, False)] = run_translate(sents, a, False, file_cache)
                 st.rerun()
@@ -2035,7 +2080,7 @@ def reading_page() -> None:
     rows = "".join(f'<div class="pp-sent"><div class="pp-no">{s.idx + 1}</div>{en_html(a, s, uls)}</div>'
                    f'{float_cards(s.idx, ctx)}' for s in shown(a))   # 처음 언급한 문장 바로 아래에 표·그림
     en_panel = (f'<div class="pp-panel pp-narrow"><div class="pp-reader-head"><div class="pp-reader-title">'
-                f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {len(a.sentences)}문장</span></div>'
+                f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {range_note(a)}</span></div>'
                 f'<div class="pp-meta">표현에 마우스를 올리거나 Tab으로 이동하면 정의와 규칙이 보여요</div></div>'
                 f'<div class="pp-sents">{rows or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>')
     if mode == "side":
