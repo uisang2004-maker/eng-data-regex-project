@@ -409,3 +409,47 @@ def test_outdented_heads_in_plain_font_are_sections():
     assert [s.title for s in paper.sections] == ["Introduction", "Materials", "Procedure"]
     assert paper.sections[0].subheads == ["Development of the protocol", "Overview of the procedure"]
     assert paper.sections[1].subheads == ["Reagents"]
+
+
+def test_unlabeled_abstract_before_first_section():
+    """'Abstract' 표시 없는 초록(Nature Protocols): 저자 줄 다음, 첫 절 바로 앞의 긴 글을 초록으로."""
+    from src.pdf_text import HEAD_MARK as H
+    from src.pdf_text import SMALL_MARK as S
+    lines = [H + "A Static Digestion Method", "", H + "Ann Lee , Bo Kim and Cy Park", "", S + "1 Some University, Cork",
+             "", "Developing an understanding of food digestion matters for nutrition.", "",
+             "Many simulations use different conditions and this impedes comparison of results.", "",
+             "The standardized protocol presented here is based on an international consensus.", "",
+             "It can be completed in about seven days with standard laboratory equipment.", "",
+             H + "Introduction", "", "The worldwide prevalence of diet-related diseases has been increasing."]
+    paper = split_paper(lines, "A Static Digestion Method")
+    assert [s.title for s in paper.sections] == ["Abstract", "Introduction"]
+    assert paper.sections[0].text.startswith("Developing an understanding")
+    assert "Ann Lee" not in paper.sections[0].text and any("초록으로" in n for n in paper.notes)
+
+
+def test_short_front_text_is_not_abstract():
+    lines = ["Space I", "", "S. Elden, Durham University", "", "Introduction", "",
+             "Space is, in many ways, the key topic of geography and it is hard to define."]
+    assert [s.title for s in split_paper(lines, "Space I").sections] == ["Introduction"]
+
+
+def test_head_with_timing_note():
+    from src.pdf_text import HEAD_MARK as H
+    from src.pdf_text import SUB_MARK as S
+    say = "Mix the sample with the simulated fluid and incubate it at body temperature."
+    lines = [H + "Introduction", "", say, "", H + "Procedure", "", say, "",
+             S + "Digestion procedure ● Timing 5–8 h", "", say]
+    paper = split_paper(lines, "T")
+    proc = next(s for s in paper.sections if s.title == "Procedure")
+    assert proc.subheads == ["Digestion procedure · Timing 5–8 h"]
+
+
+def test_numbered_steps_kept_but_footnotes_dropped():
+    step = ["1 Perform all enzyme and bile assays before the digestion experiments start in the lab.",
+            "Prepare the stock solutions of simulated fluids and store them at minus twenty degrees.",
+            "Check the pH of each solution again on the day of use and adjust it with acid or base."]
+    lines = ["Abstract", "", "We describe a digestion protocol for many foods in this short paper.", "",
+             "1 Introduction", "", "The method is simple and uses standard equipment in most labs.", "",
+             *step, "", "4 We note that the enzyme was bought from one company."]
+    text = split_paper(lines, "T").sections[1].text
+    assert "Perform all enzyme" in text and "We note that" not in text

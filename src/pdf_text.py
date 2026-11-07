@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass, field
 from statistics import median
 
+from src import patterns as P
+
 GUTTER_MIN = 8.0          # 단 사이 빈틈으로 볼 최소 너비(pt). 낱말 사이 띄어쓰기는 보통 2~4pt
 LINE_TOL = 2.5            # 같은 줄로 볼 글자 아랫선 차이(pt). 윗선은 작은 대문자 글꼴에서 글자마다 달라 쓰지 않는다
 JOIN_GAP = 0.8            # 낱말 사이가 이보다 좁으면(글꼴만 바뀐 조각) 띄어 쓰지 않고 잇는다
@@ -83,10 +85,18 @@ def _font(w: dict) -> str:
     return fonts.pop() if len(fonts) == 1 else "?"
 
 
+SYMBOL_WORD = re.compile(r"[^\w]+")      # 글자·숫자가 없는 낱말(●, •): 줄 글꼴을 정할 때 뺀다
+
+
 def _line(ws: list[dict], partner: str | None = None) -> tuple:
     """(아랫선, 글자 크기 중앙값, 줄 글자, 가장 큰 글자 크기, 줄 전체가 한 글꼴이면 그 이름 아니면 "", 왼쪽 끝 x,
     반대쪽 칸 글꼴). 마지막 값은 쪽 전체 폭 줄이면 None, 가운데 빈틈으로 가른 줄이면 같은 높이 반대쪽 칸의 글꼴("" = 없음)."""
-    fonts = {_font(w) for w in ws}
+    head = ws
+    for k in range(1, len(ws)):                 # '제목 ● Timing 5–8 h': 글꼴은 소요 시간 안내 앞 제목 부분으로만 정한다
+        if ws[k]["text"] == "Timing" and SYMBOL_WORD.fullmatch(ws[k - 1]["text"]):
+            head = ws[:k]
+            break
+    fonts = {_font(w) for w in head if not SYMBOL_WORD.fullmatch(w["text"])} or {_font(w) for w in ws}
     return (ws[0]["bottom"], median(w["size"] for w in ws), _text(ws), max(w["size"] for w in ws),
             fonts.pop() if len(fonts) == 1 and "?" not in fonts else "", ws[0]["x0"], partner)
 
@@ -160,7 +170,7 @@ def _head_fonts(pages, body: float, body_font: str) -> set[str]:
     for rows in pages:
         for r in rows:
             if r[4] and r[4] != body_font and r[1] >= body - 0.2:
-                lines.setdefault(r[4], []).append(len(r[2].split()))
+                lines.setdefault(r[4], []).append(len(P.HEAD_NOTE.sub("", r[2]).split()))
     out = set()
     for font, words in lines.items():
         if BOLD_FONT.search(font):
@@ -198,7 +208,7 @@ def _head_marks(pages, body: float, body_font: str) -> list[dict[int, str]]:
         left = _body_left(rows, body_font)
         for i, r in enumerate(rows):
             partner = r[6]
-            if (r[4] not in fonts or r[2] in rep or len(r[2].split()) > 12 or r[1] < body - 0.2
+            if (r[4] not in fonts or r[2] in rep or len(P.HEAD_NOTE.sub("", r[2]).split()) > 12 or r[1] < body - 0.2
                     or (partner and partner != body_font and partner in fonts)):
                 continue                            # 반대쪽 칸도 제목 글꼴이면 표 머리글('Child's Activity | Others Involved')
             by_size = HEAD_MARK if r[1] >= body + HEAD_GAP else SUB_MARK

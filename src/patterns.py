@@ -451,6 +451,10 @@ SEC_FONT_HEAD = re.compile(r"^(?P<title>[A-Z][A-Za-z'’-]*(?:(?:,?\s+|:\s+)(?:[
 ``Analysis: A Contemporary Focus on Ibram X. Kendi``(콜론·머리글자). 워터마크처럼 여러 쪽에 반복되는 줄은
 pdf_text가 제목 후보에서 미리 뺀다."""
 
+HEAD_NOTE = re.compile(r"\s*[●•]?\s*Timing\s+\S.*$")
+"""제목 줄 뒤에 붙은 소요 시간 안내(Nature Protocols): ``Digestion procedure ● Timing 5–8 h``. 제목은 앞부분만 보고,
+안내는 그 절 본문으로 남긴다."""
+
 SEC_STD_TOP = re.compile(
     r"^(?:Abstract|Introduction|Background|Literature\s+Review|Related\s+Work|Methods?|Methodology|"
     r"Materials\s+and\s+Methods|Data(?:\s+and\s+Methods)?|Results|Findings|Analysis|Discussion|"

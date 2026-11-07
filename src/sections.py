@@ -101,11 +101,21 @@ def heading(line: str, last_top: int, keep: frozenset[str] = frozenset(), font: 
     return ("sub", name) if value == last_top else None
 
 
+STEP_MIN_CHARS = 200
+
+
+def _numbered_step(para: list[str], text: str) -> bool:
+    """번호로 시작하는 실험 단계 문단(``1 Perform all enzyme and bile assays …``): 각주('4 We note …')와 첫머리가
+    같지만, 본문 크기 글자이고 여러 줄로 긴 문단이면 각주가 아니다(각주는 보통 작은 글자 한두 줄)."""
+    return (bool(re.match(r"\d{1,2}\s+[A-Z]", text)) and len(para) >= 2 and len(text) >= STEP_MIN_CHARS
+            and not any(ln.startswith(SMALL_MARK) for ln in para))
+
+
 def _is_noise(para: list[str], keep_small: bool = False) -> bool:
     if not keep_small and sum(ln.startswith(SMALL_MARK) for ln in para) * 2 > len(para):
         return True                              # 본문보다 작은 글자(각주·캡션·표). 초록은 작은 글자로 쓰는 형식이 있어 예외
     text = " ".join(ln.lstrip(SMALL_MARK) for ln in para)
-    if P.PDF_NOISE_PARA.match(text):
+    if P.PDF_NOISE_PARA.match(text) and not _numbered_step(para, text):
         return True
     if len(text) < 800 and (P.PDF_FRONT_MATTER.search(text) or P.EMAIL.search(text)):
         return True                              # 소속·이메일·교신저자·저작권 같은 앞머리·각주 문단
@@ -148,6 +158,23 @@ def split_paper(lines: list[str], title: str = "") -> Paper:
     return by_font if len(by_font.sections) > len(paper.sections) else paper
 
 
+ABSTRACT_MIN_CHARS = 300
+ABSTRACT_MIN_SENTS = 3
+
+
+def _front_abstract(sections: list[Section], front: list[list[str]], notes: list[str]) -> None:
+    """'Abstract' 표시 없이 시작하는 초록(Nature Protocols): 초록 절이 없고, 첫 절 바로 앞(마지막 표지·저자·각주
+    줄 다음)에 앞머리가 아닌 긴 글(300자·3문장 이상)이 있으면 그 글을 초록으로 둔다. 지어내지 않고 원문 그대로다."""
+    if not sections or any(s.title == "Abstract" for s in sections):
+        return
+    kept = [p for p in front if not _is_noise(p)]
+    text = _join(kept)
+    if len(text) < ABSTRACT_MIN_CHARS or len(re.findall(r"[.!?](?:\s|$)", text)) < ABSTRACT_MIN_SENTS:
+        return
+    sections.insert(0, Section("Abstract", paras=kept))
+    notes.append("'Abstract' 표시가 없어 첫 절 바로 앞의 긴 글을 초록으로 보여 줘요.")
+
+
 def _split(lines: list[str], title: str, use_font: bool) -> Paper:
     sections: list[Section] = []
     cur: Section | None = None
@@ -168,11 +195,12 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
     std_heads = sum(bool(P.SEC_STD_TOP.match(ln.lstrip(MARKS).strip())) for ln in body_lines
                     if ln[:1] in (HEAD_MARK, SUB_MARK))
     title_key = re.sub(r"\s+", " ", title).strip().lower()
+    front: list[list[str]] = []                  # 첫 절 바로 앞 문단들('Abstract' 표시 없는 초록 후보)
 
     def end_para():
         nonlocal para
-        if cur is not None and para:
-            cur.paras.append(para)
+        if para:
+            (cur.paras if cur is not None else front).append(para)
         para = []
 
     for raw in lines:
@@ -196,12 +224,16 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
             sections.append(cur)
             para.append(m.group("rest"))
             continue
-        h = None if small else heading(line, last_top, keep, font)  # 작은 글자 줄(번호 각주 등)은 제목이 될 수 없다
+        note = P.HEAD_NOTE.search(line) if font else None      # 'Digestion procedure ● Timing 5–8 h'
+        head_line = line[:note.start()].strip() if note else line
+        h = None if small else heading(head_line, last_top, keep, font)  # 작은 글자 줄(번호 각주 등)은 제목이 될 수 없다
         if h:
             kind, name = h
             end_para()
             if kind == "end":
                 break
+            if note and kind == "sub":
+                name += " · " + note.group().strip(" ●•")          # 소요 시간 안내는 소제목 옆에 남긴다
             if kind == "sub":
                 if cur is not None and name not in cur.subheads:     # 같은 소제목은 한 번만
                     cur.subheads.append(name)
@@ -211,10 +243,16 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
                 last_top = _top_value(m.group("top"))
             cur = Section(name)
             sections.append(cur)
+            if note:
+                para = [note.group().strip(" ●•") + "."]            # 절 제목 옆 소요 시간 안내는 그 절 첫 줄로
             continue
-        if cur is not None:
-            para.append((SMALL_MARK if small else "") + line)
+        if cur is None and (small or raw[:1] in (HEAD_MARK, SUB_MARK)):
+            front.clear()                        # 표지·제목·저자·각주 줄을 지나면 그 앞 문단은 초록 후보가 아니다
+            para = []
+            continue
+        para.append((SMALL_MARK if small else "") + line)
     end_para()
+    _front_abstract(sections, front, notes)
 
     if not sections:                             # 제목 줄을 하나도 못 찾으면 전체를 한 덩어리로
         cur = Section("본문")
