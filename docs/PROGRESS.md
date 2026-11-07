@@ -690,3 +690,15 @@
    - 고정 막대 팝오버 이름 "읽기 도우미" → **"약어·어려운 단어"**
    - 본문 끝 순서: 표·그림 안내 → ◀ 이전·다음 ▶ → **구분선** → 03
 3. 실행 결과: `py -I -m pytest` **236 passed**(부분 9개면 드롭다운·고르면 그 부분 표시 테스트). 로컬 브라우저(1440×900)에서 Brodkorb로 확인: 초록 카드 179·179·179px, Introduction 카드 205·205·205px(잘림 없음: 보이는 높이 = 내용 높이), 드롭다운 값 "처음 · 8문장", 영어 원문만 폭 960px, 다음 버튼(1608px) → 구분선(1692px) → 03(1721px)
+
+### 2026-11-07 (49) — 선택 로그인과 내 계정 저장(C)
+
+1. 이의상 님 결정: "C로 하자"(11/4 질문 → 선택지 A 브라우저 저장·B 결과 파일·C 로그인+계정 저장 중 C, 예상 완성 11/7~10). A+B는 다른 세션에서 먼저 만들어져 있어, C는 그 위에 같은 저장 형식(`src/saved.py`)으로 계정 동기화를 얹음.
+2. 구현
+   - `src/store.py`(신규): Supabase REST(PostgREST) 저장소 `SupabaseStore`(urllib+certifi, 50행씩 올림, 오류는 한국어 `StoreError`)와 테스트용 `MemoryStore`. 테이블 `paperpath_items`(글 해시 → 번역·뜻 풀이), `paperpath_docs`(문서 id → 다시 열 문서). 사용자 키 = HMAC(소금, 로그인 ID)
+   - `app.py`: 설정(`[auth]`·`SUPABASE_URL`·`SUPABASE_SERVICE_KEY`·`USER_ID_SALT`)이 모두 있을 때만 오른쪽 위 로그인·로그아웃 버튼(`st.login`/`st.logout`). 로그인하면 처음 한 번 계정 기록을 불러와 화면·'저장된 문서'에 합치고, 그 뒤 실행마다 새로 생긴 결과·문서만 올림(`account_sync`). 문서 삭제는 계정에서도 지움, '내 계정에 저장된 기록 모두 지우기'. 저장 안내 문구를 로그인 여부에 맞게 바꿈
+   - `docs/LOGIN_SETUP.md`(신규): Supabase SQL(행 수준 보안 켬), Google OAuth 클라이언트 만들기, 비밀 문자열, Streamlit Secrets 예시. `.streamlit/secrets.toml.example`
+   - `requirements.txt`: Authlib 1.9.4와 의존(joserfc·cryptography·cffi·pycparser) 고정
+3. 실행 결과: `py -I -m pytest` **242 passed**(`tests/test_store.py` 6개: 사용자 키 해시, 메모리 저장소, Supabase 요청 모양·50행 나눔·오류, **같은 계정의 새 세션에서 번역이 그대로 보이고 다른 계정에는 안 보임**, 설정이 없으면 로그인 버튼 숨김). 실제 Google·Supabase 연결은 아직 확인하지 않음(이의상 님 설정 필요)
+4. 다음: 이의상 님이 LOGIN_SETUP.md 1~4단계 설정 → 로컬·공개 사이트에서 로그인, 다른 브라우저에서 이어 보기, 지우기 확인
+

@@ -6,6 +6,7 @@
 
 import hashlib
 import html
+import os
 import re
 import time
 from pathlib import Path
@@ -25,6 +26,7 @@ from src.pdf_text import PdfError, extract as extract_pdf
 from src.sections import PAGES as PAPER_PAGES, Paper, Section, paper_pages, split_paper
 from src.tables import find_figures, find_tables, first_mentions
 from src import saved as SV
+from src import store as S
 
 # 브라우저 저장(localStorage) 컴포넌트: components/browser_store/index.html. 화면에는 보이지 않는다
 _browser_store = components.declare_component(
@@ -425,6 +427,10 @@ def init_state() -> None:
     ss.setdefault("browser_docs", {})         # 이 브라우저에 저장된 '다시 열 문서' {id: 기록}(src.saved.doc_record)
     ss.setdefault("docs_pending", {})         # 다음 실행에 브라우저에 저장할 문서
     ss.setdefault("docs_delete", [])          # 다음 실행에 브라우저에서 지울 문서 id
+    ss.setdefault("account_loaded", False)    # 로그인 뒤 내 계정 저장소에서 불러왔는지
+    ss.setdefault("account_sig", {})          # 내 계정에 올린 결과 항목: 해시 → 저장 표시
+    ss.setdefault("account_docs", {})         # 내 계정에 올린 문서: id → 저장 시각
+    ss.setdefault("account_msg", None)        # 내 계정 저장소 오류 안내
 
 
 @st.cache_resource
@@ -537,8 +543,15 @@ def saved_panel() -> None:
     docs = sorted(ss.browser_docs.values(), key=lambda d: -d.get("ts", 0))
     label = f"저장된 문서 {len(docs)}개 · 번역된 글 {n}개" if docs or n else "저장된 문서 · 결과 파일 불러오기"
     with st.expander(label, expanded=bool(docs)):
-        st.caption("읽은 문서와 번역·뜻 풀이 결과는 이 브라우저에만 저장돼요(서버에는 저장하지 않음). '다시 열기'를 누르면 "
-                   "PDF를 다시 넣지 않아도 바로 열리고, 번역한 부분은 API 없이 보여요. 다른 PC에서는 결과 파일을 불러오세요.")
+        if current_user():
+            st.caption("로그인 중: 읽은 문서(절 글자)와 번역·뜻 풀이 결과가 이 브라우저와 **내 계정**에 저장돼요. 다른 PC에서도 "
+                       "로그인하면 '다시 열기'로 이어 볼 수 있어요. 이메일·이름·PDF 파일·표 이미지는 저장하지 않아요.")
+        else:
+            st.caption("읽은 문서와 번역·뜻 풀이 결과는 이 브라우저에만 저장돼요(서버에는 저장하지 않음). '다시 열기'를 누르면 "
+                       "PDF를 다시 넣지 않아도 바로 열리고, 번역한 부분은 API 없이 보여요. 다른 PC에서는 결과 파일을 불러오세요"
+                       + (" (로그인하면 다른 PC에서도 이어 볼 수 있어요)." if auth_ready() else "."))
+        if ss.get("account_msg"):
+            st.warning(ss.account_msg)
         for d in docs[:SV.MAX_DOCS]:
             done, total = doc_progress(d)
             when = time.strftime("%m/%d %H:%M", time.localtime(d.get("ts", 0)))
@@ -555,6 +568,8 @@ def saved_panel() -> None:
             st.success(ss.saved_msg)
         if n:
             st.button("이 브라우저에 저장된 번역 모두 지우기", key="saved_clear", type="tertiary", on_click=clear_browser)
+        if current_user():
+            st.button("내 계정에 저장된 기록 모두 지우기", key="account_clear", type="tertiary", on_click=account_delete_all)
 
 
 def remember_doc(rec: dict) -> None:
@@ -624,6 +639,13 @@ def delete_doc(doc_id: str) -> None:
     ss.browser_docs.pop(doc_id, None)
     ss.docs_pending.pop(doc_id, None)
     ss.docs_delete.append(doc_id)
+    user = current_user()
+    if user:                               # 로그인했으면 내 계정에서도 지운다
+        try:
+            get_store().delete_doc(user, doc_id)
+            ss.account_docs.pop(doc_id, None)
+        except S.StoreError as e:
+            ss.account_msg = str(e)
 
 
 def on_saved_upload() -> None:
@@ -1127,8 +1149,22 @@ def topbar() -> None:
             st.radio("페이지", PAGES, key="page", horizontal=True, label_visibility="collapsed")
         status = ('<span class="pp-dot"></span>규칙 엔진 준비됨' if ok
                   else '<span class="pp-dot err"></span>규칙 엔진 오류')
-        c3.markdown(f'<div class="pp-status"><span role="status">{status}</span>'
-                    f'<span class="pp-avatar" aria-hidden="true">PP</span></div>', unsafe_allow_html=True)
+        if not auth_ready():
+            c3.markdown(f'<div class="pp-status"><span role="status">{status}</span>'
+                        f'<span class="pp-avatar" aria-hidden="true">PP</span></div>', unsafe_allow_html=True)
+            return
+        s1, s2 = c3.columns([1.3, 1], vertical_alignment="center")
+        s1.markdown(f'<div class="pp-status"><span role="status">{status}</span></div>', unsafe_allow_html=True)
+        if current_user():
+            try:
+                name = st.user.get("name") or "로그인됨"
+            except Exception:
+                name = "로그인됨"
+            s2.button("로그아웃", key="logout_btn", on_click=st.logout, use_container_width=True,
+                      help=f"{name} · 내 계정 기록은 남아요")
+        else:
+            s2.button("로그인", key="login_btn", on_click=st.login, icon=":material/login:", use_container_width=True,
+                      help="Google 계정으로 로그인하면(선택) 번역 결과가 내 계정에 저장돼 다른 PC에서도 이어 볼 수 있어요")
 
 
 def source_flag() -> str:
@@ -1247,6 +1283,96 @@ def secret(name: str) -> str | None:
     except Exception:          # 로컬에 secrets.toml이 없으면 예외가 난다
         key = None
     return key or T.load_api_key(name)
+
+
+# ================================================================ 로그인(선택)·내 계정 저장(C)
+
+@st.cache_resource
+def get_store():
+    """내 계정 저장소. Supabase 주소·키가 없으면 None(로그인 기능을 숨긴다)."""
+    if os.environ.get("PAPERPATH_TEST_STORE"):      # 테스트 전용: 서버 메모리 저장소
+        return S.MemoryStore()
+    url, key = secret("SUPABASE_URL"), secret("SUPABASE_SERVICE_KEY")
+    return S.SupabaseStore(url, key) if url and key else None
+
+
+def auth_ready() -> bool:
+    """Google 로그인 설정([auth])·저장소 키·사용자 해시 소금이 모두 있을 때만 로그인 버튼을 보여 준다."""
+    if os.environ.get("PAPERPATH_TEST_STORE"):
+        return True
+    try:
+        ok = "auth" in st.secrets and bool(st.secrets["auth"].get("client_id"))
+    except Exception:
+        ok = False
+    return ok and get_store() is not None and bool(secret("USER_ID_SALT"))
+
+
+def current_user() -> str | None:
+    """로그인한 사용자의 저장소 키(로그인 ID의 해시). 로그인하지 않았거나 설정이 없으면 None."""
+    if not auth_ready():
+        return None
+    test = os.environ.get("PAPERPATH_TEST_USER")    # 테스트 전용: 로그인한 것처럼
+    if test:
+        return S.user_key(test, "test")
+    try:
+        sub = st.user.get("sub") if st.user.is_logged_in else None
+    except Exception:
+        return None
+    return S.user_key(sub, secret("USER_ID_SALT")) if sub else None
+
+
+def account_sync() -> None:
+    """C: 로그인했으면 내 계정 저장소와 번역·뜻 풀이 결과·다시 열 문서를 맞춘다.
+    처음 한 번 계정의 기록을 불러오고(다른 PC에서 한 번역도 API 없이 보임), 그 뒤엔 새로 생긴 것만 올린다."""
+    ss = st.session_state
+    user = current_user()
+    if not user:
+        return
+    store = get_store()
+    try:
+        if not ss.account_loaded:
+            ss.account_loaded = True
+            items, docs = store.load_all(user)
+            tr, gl = SV.unpack_items(items)
+            for k, r in tr.items():
+                ss.translations.setdefault(k, r)
+            for k, g in gl.items():
+                ss.ai_gloss.setdefault(k, g)
+            for k, item in items.items():
+                ss.account_sig[k] = SV.signature(item)
+            for k, rec in docs.items():
+                if SV.valid_doc(rec):
+                    ss.account_docs[k] = rec.get("ts", 0)
+                    if k not in ss.browser_docs:
+                        remember_doc(rec)              # 이 브라우저의 '저장된 문서'에도 넣는다
+        items = SV.pack_items(ss.translations, ss.ai_gloss)
+        pending = {k: v for k, v in items.items() if ss.account_sig.get(k) != SV.signature(v)}
+        docs = {k: d for k, d in ss.browser_docs.items() if ss.account_docs.get(k) != d.get("ts", 0)}
+        if pending:
+            store.put_items(user, pending)
+            ss.account_sig.update({k: SV.signature(v) for k, v in pending.items()})
+        if docs:
+            store.put_docs(user, docs)
+            ss.account_docs.update({k: d.get("ts", 0) for k, d in docs.items()})
+        ss.account_msg = None
+    except S.StoreError as e:
+        ss.account_msg = str(e)
+
+
+def account_delete_all() -> None:
+    ss = st.session_state
+    user = current_user()
+    if not user:
+        return
+    try:
+        get_store().delete_all(user)
+    except S.StoreError as e:
+        ss.account_msg = str(e)
+        return
+    # 지금 화면에 남은 결과를 다음 동기화 때 다시 올리지 않도록 '올린 것'으로 표시해 둔다
+    ss.account_sig = {k: SV.signature(v) for k, v in SV.pack_items(ss.translations, ss.ai_gloss).items()}
+    ss.account_docs = {k: d.get("ts", 0) for k, d in ss.browser_docs.items()}
+    ss.saved_msg = "내 계정에 저장된 기록을 모두 지웠어요(이 브라우저에 저장된 것은 그대로예요)."
 
 
 def engine():
@@ -2043,6 +2169,7 @@ def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     init_state()
     browser_sync()
+    account_sync()
     topbar()
     page = st.session_state.page
     if page == PAGES[0]:

@@ -8,3 +8,8 @@ pdfplumber==0.11.10
 pdfminer.six==20260107
 pypdfium2==5.14.0
 pillow==13.0.0
+Authlib==1.9.4
+joserfc==1.8.0
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.12
