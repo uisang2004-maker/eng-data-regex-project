@@ -312,7 +312,9 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-sk-more[open] .pp-more-btn:after { content:" 접기"; } .pp-sk-more[open] .pp-more-btn { font-size:0; }
 .pp-sk-more[open] .pp-more-btn:after { font-size:12px; }
 /* 02 표시 칩: 누르기 쉽게 간격·여백을 넓힌다 */
-.st-key-mark_pills [data-testid="stButtonGroup"] > div { gap:8px !important; }
+.st-key-mark_pills [data-testid="stButtonGroup"] > div { gap:8px !important; flex-wrap:wrap !important; }
+.st-key-chip_row .pp-chips { justify-content:flex-start; }
+.st-key-chip_row .pp-nav-label { margin-top:0; }
 .st-key-mark_pills button { padding:5px 13px !important; min-height:32px; }
 /* 01 카드: 같은 줄의 카드 높이를 가장 높은 카드에 맞춘다 */
 /* height:100%로 하면 가장 긴 카드가 줄 높이에 잘리므로, 칸을 세로 flex로 두고 남는 높이만 채운다 */
@@ -2102,12 +2104,15 @@ def reading_page() -> None:
         st.markdown(f'<div class="pp-limit">한계·향후 과제 문장: {", ".join("문장 " + str(i + 1) for i in a.limit_idx)}</div>',
                     unsafe_allow_html=True)
 
-    t1, t2, t3 = st.columns([1.4, 2.2, 1], vertical_alignment="center")
+    # 제목 줄(02 · 단계 보기 토글) 아래에 칩을 한 줄 전체 폭으로: 가운데 좁은 칸에 두면 칩이 많을 때 토글을 덮었다
+    t1, t3 = st.columns([3, 1], vertical_alignment="center")
     t1.markdown(sec_head("02", "원문과 번역 읽기"), unsafe_allow_html=True)
-    with t2:
-        mark_chips(a)
     with t3:
         st.toggle("읽기 전용 단계 보기", key="show_steps")
+    with st.container(key="chip_row"):
+        st.markdown('<div class="pp-nav-label">형광펜 켜고 끄기 · 누르면 그 표시만 꺼지고 다시 누르면 켜져요</div>',
+                    unsafe_allow_html=True)
+        mark_chips(a)
     if ss.show_steps:
         steps_panel(a)
 
