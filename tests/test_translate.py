@@ -349,5 +349,5 @@ def test_usage_check_batch(tmp_path):
     path = tmp_path / "u.json"
     assert usage.check_batch([3900, 3900, 1200], 0, path, engine="claude") is None
     assert "번까지" in usage.check_batch([100] * 5, 56, path, engine="claude")
-    usage.record(299_000, path)
+    usage.record(usage.LIMITS["claude"].daily - 1_000, path)
     assert "오늘" in usage.check_batch([900, 900], 0, path, engine="claude")

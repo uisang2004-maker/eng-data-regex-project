@@ -27,6 +27,7 @@ from src.sections import PAGES as PAPER_PAGES, Paper, Section, paper_pages, spli
 from src.tables import find_figures, find_tables, first_mentions
 from src import saved as SV
 from src import store as S
+from src import quota as Q
 
 # 브라우저 저장(localStorage) 컴포넌트: components/browser_store/index.html. 화면에는 보이지 않는다
 _browser_store = components.declare_component(
@@ -431,6 +432,8 @@ def init_state() -> None:
     ss.setdefault("account_sig", {})          # 내 계정에 올린 결과 항목: 해시 → 저장 표시
     ss.setdefault("account_docs", {})         # 내 계정에 올린 문서: id → 저장 시각
     ss.setdefault("account_msg", None)        # 내 계정 저장소 오류 안내
+    ss.setdefault("current_doc", None)        # 지금 읽는 문서 id(번역 한도를 세는 단위, src/quota.py)
+    ss.setdefault("guest_chars", 0)           # 로그인하지 않고 이 화면에서 번역한 글자 수(맛보기 한도)
 
 
 @st.cache_resource
@@ -574,11 +577,13 @@ def saved_panel() -> None:
             st.button("내 계정에 저장된 기록 모두 지우기", key="account_clear", type="tertiary", on_click=account_delete_all)
 
 
-def remember_doc(rec: dict) -> None:
-    """읽은 문서를 '저장된 문서'에 넣는다(다음 실행에서 브라우저에 저장)."""
+def remember_doc(rec: dict, current: bool = False) -> None:
+    """읽은 문서를 '저장된 문서'에 넣는다(다음 실행에서 브라우저에 저장). current: 지금 읽기 시작한 문서(번역 한도를 셀 문서)."""
     ss = st.session_state
     ss.browser_docs[rec["id"]] = rec
     ss.docs_pending[rec["id"]] = rec
+    if current:
+        ss.current_doc = rec["id"]
 
 
 def doc_texts(rec: dict) -> list[str]:
@@ -615,7 +620,7 @@ def open_doc(doc_id: str) -> None:
     if not rec:
         return
     rec = {**rec, "ts": time.time()}
-    remember_doc(rec)                      # 최근에 연 문서가 위로 오게
+    remember_doc(rec, current=True)        # 최근에 연 문서가 위로 오게
     ss.input_error = None
     ss.paper_tables, ss.paper_figures = [], []
     if rec["kind"] == "pdf":
@@ -760,7 +765,7 @@ def load_pdf(data: bytes, name: str) -> str | None:
     remember_doc(SV.doc_record("pdf", paper.title or name,
                                [{"title": s.title, "text": s.text, "subheads": s.subheads, "sub_at": s.sub_at}
                                 for s in paper.sections],
-                               {"notes": paper.notes}))
+                               {"notes": paper.notes}), current=True)
     return None
 
 
@@ -1232,7 +1237,7 @@ def input_panel() -> None:
                         ss.paper = None
                         ss.show_input = False
                         remember_doc(SV.doc_record("arxiv", row["title"], [{"title": "Abstract", "text": row["abstract"]}],
-                                                   {"arxiv_id": row["id"]}))
+                                                   {"arxiv_id": row["id"]}), current=True)
                     except ArxivError as e:
                         ss.input_error = str(e)
             else:
@@ -1250,7 +1255,8 @@ def input_panel() -> None:
                     ss.paper = None
                     ss.show_input = False
                     first = txt.split(".")[0][:60]
-                    remember_doc(SV.doc_record("paste", f"붙여 넣은 글 · {first}", [{"title": "붙여 넣은 글", "text": txt}]))
+                    remember_doc(SV.doc_record("paste", f"붙여 넣은 글 · {first}", [{"title": "붙여 넣은 글", "text": txt}]),
+                                 current=True)
             if not ss.input_error:
                 st.rerun()                 # 위쪽 출처 표시까지 새 글 기준으로 다시 그린다
         if ss.input_error:
@@ -1467,15 +1473,82 @@ def run_translate(sents, a, masked: bool, file_cache: bool, **layers):
     lim = usage.LIMITS[name]
     sizes = [sum(len(s) + 1 for s in sents[x:y]) for x, y in T.chunk_ranges(sents, lim.per_request)]
     reason = usage.check_batch(sizes, ss.deepl_calls, engine=name) if key else None
-    if reason:
-        return T.TranslationResult(ko=None, mode="none", masked=masked, error=reason)
+    gate = quota_gate(a, sum(sizes)) if key and not reason else None
+    if reason or (gate and gate[0]):
+        return T.TranslationResult(ko=None, mode="none", masked=masked, error=reason or gate[0])
     caller = CountingCaller(fn)
     res = T.translate_chunked(sents, lim.per_request, acronyms=a.acronyms, masked=masked,
                               use_file_cache=file_cache, api_key=key, caller=caller, engine=name, **layers)
     if caller.calls:
         usage.record(caller.chars)
         ss.deepl_calls += caller.calls             # 엔진과 상관없이 이 화면의 번역 호출 수
+        quota_record(gate, caller.chars)
     return res
+
+
+# ---------------------------------------------------------------- 사용자별 번역 한도(src/quota.py)
+
+def quota_doc(a) -> tuple[str, bool]:
+    """번역 한도를 셀 문서 id와, 오늘 전에 이미 번역을 시작한 문서인지(저장된 번역이 있는 글이 있으면)."""
+    ss = st.session_state
+    rec = ss.browser_docs.get(ss.current_doc) if ss.current_doc else None
+    if rec is None:
+        return text_key(a.text), False
+    return rec["id"], doc_progress(rec)[0] > 0
+
+
+def quota_gate(a, chars: int):
+    """보내기 전 확인. 로그인 설정이 없으면(로컬 개발) 사용자별 한도를 두지 않는다.
+    돌려주는 값: (막는 이유 또는 None, 기록에 쓸 정보)."""
+    if not auth_ready():
+        return None
+    ss = st.session_state
+    user = current_user()
+    if not user:
+        return Q.check_guest(ss.guest_chars, chars), ("guest",)
+    doc_id, started = quota_doc(a)
+    try:
+        day_usage = get_store().get_usage(user, usage._today())
+    except S.StoreError:
+        return None, None                  # 저장소가 잠깐 안 되면 사이트 전체 한도만 적용한다
+    started = started and doc_id not in (day_usage.get("docs") or {})
+    return Q.check_user(day_usage, doc_id, started, chars), ("user", user, doc_id, started)
+
+
+def quota_record(gate, chars: int) -> None:
+    """번역 API를 실제로 부른 글자 수만 기록한다(저장된 번역·캐시는 세지 않음)."""
+    if not gate or not gate[1]:
+        return
+    ss = st.session_state
+    info = gate[1]
+    if info[0] == "guest":
+        ss.guest_chars += chars
+        return
+    _, user, doc_id, started = info
+    try:
+        day = usage._today()
+        get_store().put_usage(user, day, Q.add_user(get_store().get_usage(user, day), doc_id, started, chars))
+    except S.StoreError as e:
+        ss.account_msg = str(e)
+
+
+def quota_line() -> str | None:
+    """번역 칸에 보여 줄 오늘 남은 번역. 로그인 설정이 없으면 None."""
+    if not auth_ready():
+        return None
+    ss = st.session_state
+    user = current_user()
+    if not user:
+        return (f"로그인 없이 맛보기 번역 {ss.guest_chars:,}/{Q.GUEST_CHARS:,}자 · 로그인하면 하루에 논문 "
+                f"{Q.PAPERS_PER_DAY}편을 끝까지 번역할 수 있어요")
+    try:
+        day_usage = get_store().get_usage(user, usage._today())
+    except S.StoreError:
+        return None
+    docs = day_usage.get("docs") or {}
+    cur = docs.get(ss.current_doc or "", {})
+    return (f"오늘 새 논문 {Q.new_papers(day_usage)}/{Q.PAPERS_PER_DAY}편 번역 · 이 논문 오늘 {cur.get('chars', 0):,}/"
+            f"{Q.MAX_CHARS_PER_PAPER:,}자 · 저장된 번역을 다시 여는 것은 세지 않아요")
 
 
 def ko_html(res, i: int, a, off=None) -> str:
@@ -1868,6 +1941,9 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False, where: s
                     f"{(' (' + ', '.join(lost_off[:5]) + ')') if lost_off else ''} · 번역이 달라진 문장 {diff}개. "
                     "차이가 작을 수 있어요(검증 결과 탭의 30편 실측 참고).")
         lim = usage.LIMITS[engine()[0]]
+        line = quota_line()
+        if line:
+            st.caption(line)
         if ss.deepl_calls >= lim.per_session * 0.8:     # 평소에는 숨기고 한도에 가까울 때만 알린다
             st.caption(f"번역 {ss.deepl_calls}/{lim.per_session}회",
                        help=f"이 화면에서 번역을 {lim.per_session}번까지 쓸 수 있어요. 오늘 사이트 전체 {usage.used_today():,}/"

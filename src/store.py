@@ -21,6 +21,7 @@ import certifi
 
 ITEMS = "paperpath_items"
 DOCS = "paperpath_docs"
+USAGE = "paperpath_usage"      # 사용자별 하루 번역 기록(src/quota.py)
 BATCH = 50                     # 한 번에 올릴 행 수
 
 
@@ -39,6 +40,13 @@ class MemoryStore:
     def __init__(self):
         self.items: dict[tuple[str, str], dict] = {}
         self.docs: dict[tuple[str, str], dict] = {}
+        self.usage: dict[tuple[str, str], dict] = {}
+
+    def get_usage(self, user: str, day: str) -> dict:
+        return json.loads(json.dumps(self.usage.get((user, day), {})))
+
+    def put_usage(self, user: str, day: str, usage: dict) -> None:
+        self.usage[(user, day)] = json.loads(json.dumps(usage))
 
     def load_all(self, user: str) -> tuple[dict, dict]:
         return ({k: json.loads(json.dumps(v)) for (u, k), v in self.items.items() if u == user},
@@ -113,6 +121,14 @@ class SupabaseStore:
 
     def delete_doc(self, user: str, doc_id: str) -> None:
         self._req("DELETE", DOCS, {"user_id": f"eq.{user}", "doc_id": f"eq.{doc_id}"})
+
+    def get_usage(self, user: str, day: str) -> dict:
+        rows = self._req("GET", USAGE, {"user_id": f"eq.{user}", "day": f"eq.{day}", "select": "usage"})
+        return rows[0]["usage"] if rows else {}
+
+    def put_usage(self, user: str, day: str, usage: dict) -> None:
+        self._req("POST", USAGE, body=[{"user_id": user, "day": day, "usage": usage}],
+                  prefer="resolution=merge-duplicates,return=minimal")
 
     def delete_all(self, user: str) -> None:
         self._req("DELETE", ITEMS, {"user_id": f"eq.{user}"})

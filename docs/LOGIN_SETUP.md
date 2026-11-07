@@ -30,7 +30,18 @@ create table if not exists paperpath_docs (
 -- 행 수준 보안을 켜고 정책은 두지 않는다: 공개 키(anon)로는 읽지도 쓰지도 못하고, 서버 전용 키로만 접근한다
 alter table paperpath_items enable row level security;
 alter table paperpath_docs enable row level security;
+
+-- 사용자별 하루 번역 기록(하루 새 논문 1편 한도, src/quota.py)
+create table if not exists paperpath_usage (
+  user_id text not null,
+  day text not null,
+  usage jsonb not null,
+  primary key (user_id, day)
+);
+alter table paperpath_usage enable row level security;
 ```
+
+이미 앞의 두 테이블을 만들었다면 `paperpath_usage` 부분만 한 번 더 실행하면 됩니다.
 
 3. **Project Settings → API Keys**에서 두 값을 적어 둡니다.
    - Project URL: `https://xxxx.supabase.co` (Data API 메뉴에 있음)
