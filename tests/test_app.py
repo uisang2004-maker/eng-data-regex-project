@@ -432,3 +432,23 @@ def test_body_section_has_no_position_fallback(blank):
     next(g for g in at.get("button_group") if g.key == "section_pick").set_value(1).run()
     out = "\n".join(m.value for m in at.markdown)
     assert "먼저 읽을 3줄 뼈대" in out and "분야 배경 (첫 문장)" not in out
+
+
+def test_side_mode_before_translation_shows_english_only(at):
+    out = md_text(at)
+    assert at.session_state["read_mode"] == "side" and 'class="pp-side-row"' not in out
+    assert 'class="pp-panel pp-narrow"' in out                         # 번역 전에는 영어 원문 한 칸
+
+
+def test_flow_map_points_to_cards_instead_of_repeating(at):
+    out = md_text(at)
+    assert "위 01 카드 참고" in out
+
+
+def test_long_skeleton_sentence_is_clamped():
+    from app import SK_CLAMP_CHARS, skeleton_card
+    from src.extract import analyze
+    long = "We introduce a method that " + "keeps reading the long sentence and " * 12 + "ends here."
+    a = analyze(long)
+    card = next(c for c in a.skeleton if c.sentence_idx is not None)
+    assert len(long) > SK_CLAMP_CHARS and 'class="pp-sk-more"' in skeleton_card(card, a)

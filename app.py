@@ -41,6 +41,7 @@ CHIPS = (("abbr", "약어", "blue"), ("hedge", "추측·가능성", "amber"), ("
 CHIP_RULE = {"abbr": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE",
              "definition": "DEFINITION", "term": "TERM", "number": "NUMBER"}     # 칩 → 켜고 끌 규칙
 CHIP_COLOR = {"blue": "blue", "amber": "orange", "teal": "green", "violet": "violet"}
+SK_CLAMP_CHARS = 280                 # 뼈대 카드 문장이 이보다 길면 6줄까지만 보이고 '전체 보기'
 GLOSS_PREVIEW = 8                    # 단어표는 처음 8개만 보이고 나머지는 '전체 단어표 보기'로
 TIMES = re.compile(r"(\d+)번")      # 반복 용어 표시 설명에서 등장 횟수
 READ_MODES = ("side", "pair", "en", "ko")      # 읽기 모드: 한영 나란히 / 문장마다 한영 / 원문만 / 한국어만
@@ -296,6 +297,17 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-narrow, .st-key-ko_only { max-width:880px; margin-left:auto !important; margin-right:auto !important; }
 .st-key-part_next_box [data-testid="stButton"] { display:flex; justify-content:flex-end; }
 .st-key-part_bar { scroll-margin-top:72px; }   /* 위에 붙은 막대에 가리지 않게 */
+.pp-nav-label { font-size:12px; font-weight:750; color:#2c4560; margin:6px 0 3px; }
+.pp-sk-more summary { list-style:none; cursor:pointer; }
+.pp-sk-more summary::-webkit-details-marker { display:none; }
+.pp-sk-more .pp-sk-text { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+.pp-sk-more[open] .pp-sk-text { display:block; -webkit-line-clamp:unset; }
+.pp-more-btn { display:inline-block; margin-top:4px; font-size:12px; font-weight:700; color:#3979b5; }
+.pp-sk-more[open] .pp-more-btn:after { content:" 접기"; } .pp-sk-more[open] .pp-more-btn { font-size:0; }
+.pp-sk-more[open] .pp-more-btn:after { font-size:12px; }
+/* 02 표시 칩: 누르기 쉽게 간격·여백을 넓힌다 */
+.st-key-mark_pills [data-testid="stButtonGroup"] > div { gap:8px !important; }
+.st-key-mark_pills button { padding:5px 13px !important; min-height:32px; }
 .pp-jump { margin-left:10px; font-size:12px; font-weight:700; color:#3979b5; text-decoration:none; white-space:nowrap; }
 #pp-03 { scroll-margin-top:72px; }
 .pp-proto-list { margin:6px 0 0; padding-left:0; list-style:none; }
@@ -927,6 +939,8 @@ def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
         ul = card_underlines(a).get(card.sentence_idx, [])
         body = (f'<div class="pp-sk-text"><span class="pp-sk-no">문장 {card.sentence_idx + 1}</span>'
                 f'{render_layers(s, spans, ul)}</div>')
+        if len(s) > SK_CLAMP_CHARS:        # 아주 긴 문장은 6줄까지만 보이고 눌러서 전체(세 카드 높이를 맞춤)
+            body = f'<details class="pp-sk-more"><summary>{body}<span class="pp-more-btn">전체 보기</span></summary></details>'
         if ko:
             body += f'<div class="pp-sk-ko">{render_layers(ko, [], ko_ul)}</div>'
         basis = card.label
@@ -955,6 +969,7 @@ ROLE_META = {"background": ("배경", "gray"), "problem": ("문제", "blue"), "m
 def flow_map(a, tr=None) -> str:
     """논문 흐름도: 문장 역할(배경 → 문제 → 방법 → 결과 → 한계)을 순서대로 이어 보여 준다."""
     uls = {c.sentence_idx: c.underline for c in a.skeleton if c.sentence_idx is not None and c.underline}
+    in_cards = {c.sentence_idx for c in a.skeleton if c.sentence_idx is not None}
     steps = []
     for role in ROLE_ORDER:
         idxs = [i for i, r in enumerate(a.roles) if r == role]
@@ -963,6 +978,11 @@ def flow_map(a, tr=None) -> str:
         name, color = ROLE_META[role]
         i = idxs[0]
         s = a.sentences[i].text
+        if i in in_cards:                  # 01 카드에 이미 나온 문장은 다시 쓰지 않고 가리키기만 한다
+            steps.append(f'<div class="pp-flow-step {color}"><div class="pp-flow-head"><b>{name}</b>'
+                         + "".join(f'<span class="pp-flow-no">{j + 1}</span>' for j in idxs)
+                         + f'</div><div class="pp-flow-text pp-meta">문장 {i + 1} · 위 01 카드 참고</div></div>')
+            continue
         if i in uls:
             snippet = s[uls[i][0]:uls[i][1]]
         else:
@@ -1032,6 +1052,7 @@ def paper_overview(paper) -> None:
     with st.container(key="paper_nav"):
         ss.setdefault("paper_page", ss.source.get("page"))     # 입력 칸을 열었다 닫으면 위젯 상태가 지워져 다시 채운다
         labels = {p: (f"{p} · {len(ids)}개 절" if p == "본문" else p) for p, ids in pages.items()}
+        st.markdown('<div class="pp-nav-label">쪽 고르기 · 초록 / 본문 / 결론</div>', unsafe_allow_html=True)
         st.segmented_control("쪽", list(pages), format_func=labels.get, key="paper_page", on_change=on_page_change,
                              label_visibility="collapsed")
         if "결론" not in pages:
@@ -1039,6 +1060,7 @@ def paper_overview(paper) -> None:
         if ss.source.get("page") == "본문":
             body = pages["본문"]
             ss.setdefault("section_pick", ss.body_cur)
+            st.markdown('<div class="pp-nav-label">본문 절 고르기</div>', unsafe_allow_html=True)
             st.pills("본문 절 고르기", list(range(len(body))), format_func=lambda j: titles[body[j]], key="section_pick",
                      on_change=pick_section, label_visibility="collapsed")
 
@@ -1543,8 +1565,10 @@ def part_picker(a) -> list[tuple[str, int, int]]:
     by_sub = not parts[0][0].startswith("문장 ")
     labels = {k: f"{name} · {hi - lo}문장" for k, (name, lo, hi) in enumerate(parts)}
     with st.container(key="part_bar"):
-        st.caption(f"이 글은 {len(a.sentences)}문장이라 {'소제목' if by_sub else '30문장'} 단위로 나눠 보여 줘요. "
-                   "번역·형광펜·뼈대는 글 전체 기준이에요.")
+        what = "이 절 안의 소제목" if by_sub else "이 글 안의 부분(30문장씩)"
+        st.markdown(f'<div class="pp-nav-label">{what} · {len(a.sentences)}문장을 나눠 보여 줘요</div>',
+                    unsafe_allow_html=True)
+        st.caption("번역·형광펜·뼈대는 글 전체 기준이에요. 아래 ◀ ▶ 버튼으로도 넘길 수 있어요.")
         st.pills("읽을 부분", list(range(len(parts))), format_func=labels.get, key="part_pick",
                  label_visibility="collapsed")
     k = ss.part_pick if ss.part_pick is not None else 0
@@ -1796,7 +1820,10 @@ def reading_page() -> None:
                 f'<div class="pp-sents">{rows or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>')
     if mode == "side":
         translation_panel(a, rows_on=False, where="아래에서 영어 문장과 한 줄씩 나란히")
-        side_panel(a)                      # 문장 짝마다 한 행: 영어·한국어 높이가 같이 늘어 끝까지 어긋나지 않는다
+        if current_translation(a) is None:     # 번역 전에는 오른쪽 칸이 통째로 비므로 영어 원문만 한 칸으로
+            st.markdown(en_panel, unsafe_allow_html=True)
+        else:
+            side_panel(a)                  # 문장 짝마다 한 행: 영어·한국어 높이가 같이 늘어 끝까지 어긋나지 않는다
     elif mode == "pair":
         interleaved_panel(a)
         translation_panel(a, rows_on=False, where="위 원문 문장마다 바로 아래에")
