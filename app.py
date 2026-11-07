@@ -552,6 +552,8 @@ def saved_panel() -> None:
                        + (" (로그인하면 다른 PC에서도 이어 볼 수 있어요)." if auth_ready() else "."))
         if ss.get("account_msg"):
             st.warning(ss.account_msg)
+        elif current_user():
+            st.caption(f"내 계정 동기화: 문서 {len(ss.account_docs)}개 · 번역·뜻 풀이 글 {len(ss.account_sig)}개가 계정에 있어요.")
         for d in docs[:SV.MAX_DOCS]:
             done, total = doc_progress(d)
             when = time.strftime("%m/%d %H:%M", time.localtime(d.get("ts", 0)))
@@ -1331,8 +1333,8 @@ def account_sync() -> None:
     store = get_store()
     try:
         if not ss.account_loaded:
-            ss.account_loaded = True
             items, docs = store.load_all(user)
+            ss.account_loaded = True               # 불러오기에 성공했을 때만(실패하면 다음 실행에서 다시 시도)
             tr, gl = SV.unpack_items(items)
             for k, r in tr.items():
                 ss.translations.setdefault(k, r)

@@ -117,3 +117,19 @@ def test_login_hidden_without_settings(monkeypatch):
     at = AppTest.from_file(APP, default_timeout=30)
     at.run()
     assert not any(b.key in ("login_btn", "logout_btn") for b in at.button)
+
+
+def test_supabase_error_detail_and_nul_removed(monkeypatch):
+    import io
+
+    sent = []
+
+    def fake_urlopen(req, timeout, context):
+        sent.append(req)
+        raise S.urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {},
+                                       io.BytesIO(b'{"message":"Invalid API key"}'))
+
+    monkeypatch.setattr(S.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(S.StoreError, match="401 · Invalid API key"):
+        S.SupabaseStore("https://abc.supabase.co", "k").put_docs("u1", {"d": {"text": "a\x00b"}})
+    assert b"\u0000" not in sent[0].data and "ab" in json.loads(sent[0].data)[0]["doc"]["text"]

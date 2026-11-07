@@ -75,13 +75,22 @@ class SupabaseStore:
             headers["Authorization"] = f"Bearer {self.key}"
         if prefer:
             headers["Prefer"] = prefer
-        data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+        data = None
+        if body is not None:
+            # Postgres jsonb는 NUL 문자(\u0000)를 받지 않는다(PDF 글자에 섞여 들어올 수 있음) → 지우고 보낸다
+            data = json.dumps(body, ensure_ascii=False).replace("\\u0000", "").encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx) as r:
                 raw = r.read()
         except urllib.error.HTTPError as e:
-            raise StoreError(f"내 계정 저장소 오류(HTTP {e.code}). 결과는 이 브라우저에는 그대로 저장돼요.") from e
+            detail = ""
+            try:                                  # Supabase가 돌려준 오류 이유(키 값은 들어 있지 않다)
+                err = json.loads(e.read() or b"{}")
+                detail = " · " + str(err.get("message") or err.get("msg") or err.get("hint") or "")[:160]
+            except Exception:
+                pass
+            raise StoreError(f"내 계정 저장소 오류(HTTP {e.code}{detail}). 결과는 이 브라우저에는 그대로 저장돼요.") from e
         except (urllib.error.URLError, TimeoutError) as e:
             raise StoreError("내 계정 저장소에 연결하지 못했어요. 결과는 이 브라우저에는 그대로 저장돼요.") from e
         return json.loads(raw) if raw else []
