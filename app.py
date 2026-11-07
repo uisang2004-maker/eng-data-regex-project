@@ -296,7 +296,7 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-float-short { font-size:12px; color:#5b6d80; margin-left:4px; }
 .pp-float details[open] .pp-float-short { display:none; }
 /* 한 언어만 볼 때(영어 원문만·한국어만): 한 줄이 너무 길지 않게 가운데 좁은 폭 */
-.pp-narrow, .st-key-ko_only { max-width:880px; margin-left:auto !important; margin-right:auto !important; }
+.pp-narrow, .st-key-ko_only { max-width:960px; margin-left:auto !important; margin-right:auto !important; }
 .st-key-part_next_box [data-testid="stButton"] { display:flex; justify-content:flex-end; }
 .st-key-part_bar { scroll-margin-top:72px; }   /* 위에 붙은 막대에 가리지 않게 */
 .pp-nav-label { font-size:12px; font-weight:750; color:#2c4560; margin:6px 0 3px; }
@@ -310,6 +310,12 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 /* 02 표시 칩: 누르기 쉽게 간격·여백을 넓힌다 */
 .st-key-mark_pills [data-testid="stButtonGroup"] > div { gap:8px !important; }
 .st-key-mark_pills button { padding:5px 13px !important; min-height:32px; }
+/* 01 카드: 같은 줄의 카드 높이를 가장 높은 카드에 맞춘다 */
+/* height:100%로 하면 가장 긴 카드가 줄 높이에 잘리므로, 칸을 세로 flex로 두고 남는 높이만 채운다 */
+.st-key-card_row [data-testid="stColumn"]:has(.pp-card), .st-key-card_row [data-testid="stColumn"] div:has(.pp-card) {
+  display:flex; flex-direction:column; flex:1 1 auto; }
+.st-key-card_row .pp-card { height:auto; flex:1 1 auto; }
+.pp-end { border:0; border-top:2px solid #d9e3ee; margin:26px 0 8px; }
 .pp-jump { margin-left:10px; font-size:12px; font-weight:700; color:#3979b5; text-decoration:none; white-space:nowrap; }
 #pp-03 { scroll-margin-top:72px; }
 .pp-proto-list { margin:6px 0 0; padding-left:0; list-style:none; }
@@ -481,11 +487,11 @@ def set_show_input(on: bool) -> None:
 
 
 def loaded_bar(a) -> None:
-    """자료를 넣은 뒤 맨 위에 붙어 있는 막대: 지금 읽는 자료, 읽기 도우미, 결과 파일, 다시 넣기.
+    """자료를 넣은 뒤 맨 위에 붙어 있는 막대: 지금 읽는 자료, 약어·어려운 단어 팝오버, 결과 파일, 다시 넣기.
     스크롤해도 따라오므로 읽는 도중에 약어·어려운 단어를 바로 펼쳐 볼 수 있다."""
     with st.container(key="loaded_bar"):
         c1, c4, c3, c2 = st.columns([3.4, 1.15, 1.3, 1], vertical_alignment="center")
-        with c4.popover("읽기 도우미", icon=":material/menu_book:", use_container_width=True):
+        with c4.popover("약어·어려운 단어", icon=":material/menu_book:", use_container_width=True):
             reading_helper(a)
         c1.markdown(f'<div class="pp-loaded"><span class="pp-loaded-label">지금 읽는 자료</span>'
                     f'{esc(source_flag())}<a class="pp-jump" href="#pp-03">03 자료로 ↓</a></div>', unsafe_allow_html=True)
@@ -500,7 +506,7 @@ def loaded_bar(a) -> None:
 
 
 def reading_helper(a) -> None:
-    """읽기 도우미(고정 막대의 팝오버): 이 글의 약어와 어려운 단어 상위 8개를 뜻과 함께."""
+    """'약어·어려운 단어' 팝오버(고정 막대): 이 글의 약어와 어려운 단어 상위 8개를 뜻과 함께."""
     ss = st.session_state
     tr = ss.translations.get((text_key(a.text), True))
     rows = G.build(a, G.korean_marks(tr))
@@ -1466,6 +1472,7 @@ def float_pop(phrase: str, sent_idx: int | None, ctx) -> tuple[str, str]:
 
 LONG_SENTS = 40                       # 문장이 이보다 많은 글은 나눠 읽는다
 PART_SENTS = 30                       # 소제목 위치를 모를 때 한 부분의 문장 수
+PART_PILLS_MAX = 6                    # 부분이 이보다 많으면 버튼 대신 드롭다운
 
 
 def section_now():
@@ -1571,8 +1578,12 @@ def part_picker(a) -> list[tuple[str, int, int]]:
         st.markdown(f'<div class="pp-nav-label">{what} · {len(a.sentences)}문장을 나눠 보여 줘요</div>',
                     unsafe_allow_html=True)
         st.caption("번역·형광펜·뼈대는 글 전체 기준이에요. 아래 ◀ ▶ 버튼으로도 넘길 수 있어요.")
-        st.pills("읽을 부분", list(range(len(parts))), format_func=labels.get, key="part_pick",
-                 label_visibility="collapsed")
+        if len(parts) > PART_PILLS_MAX:    # 부분이 많으면 버튼이 여러 줄로 쌓이므로 드롭다운 하나로
+            st.selectbox("읽을 부분", list(range(len(parts))), format_func=labels.get, key="part_pick",
+                         label_visibility="collapsed")
+        else:
+            st.pills("읽을 부분", list(range(len(parts))), format_func=labels.get, key="part_pick",
+                     label_visibility="collapsed")
     k = ss.part_pick if ss.part_pick is not None else 0
     ss.part_last, ss.part_of_last = k, key
     ss.part_range = {key: parts[k][1:]}
@@ -1766,7 +1777,7 @@ def reading_page() -> None:
             empty_guide()
         return                             # 입력 칸이 열려 있는 동안은 결과 창을 숨긴다
 
-    # 자료를 넣은 뒤: 큰 제목 없이, 스크롤해도 위에 붙어 있는 막대 하나(읽기 도우미·결과 파일·다시 넣기)
+    # 자료를 넣은 뒤: 큰 제목 없이, 스크롤해도 위에 붙어 있는 막대 하나(약어·어려운 단어·결과 파일·다시 넣기)
     rules = set(ss.active_rules)
     if not fallback_ok():
         rules.discard("SK_FALLBACK")       # 본문 절의 첫 문장은 '분야 배경'이 아니므로 위치로 대신 고르지 않는다
@@ -1782,11 +1793,12 @@ def reading_page() -> None:
     if protocol_section(a):                # 실험 절차 절: 문제·방법·결과 대신 원문의 주의·멈춤 지점·소요 시간 표시
         st.markdown(sec_head("01", f"먼저 볼 실험 절차 요점{where}", "원문에 표시된 주의·멈춤 지점·소요 시간 · 정규식으로 찾음"),
                     unsafe_allow_html=True)
-        protocol_cards(a)
+        with st.container(key="card_row"):
+            protocol_cards(a)
     else:
         st.markdown(sec_head("01", f"먼저 읽을 3줄 뼈대{where}", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
                     unsafe_allow_html=True)
-        cols = st.columns(3)
+        cols = st.container(key="card_row").columns(3)
         tr = ss.translations.get((text_key(a.text), True))
         for col, card in zip(cols, a.skeleton):
             i = card.sentence_idx
@@ -1836,11 +1848,12 @@ def reading_page() -> None:
     else:
         with st.container(key="ko_only"):
             translation_panel(a, floats_on=True)
-    if parts:
-        part_nav_buttons(parts)
     if ctx[0]:
         st.caption(f"이 글에 나온 표·그림 {len(ctx[0])}개({', '.join(t.label for t in ctx[0].values())})는 처음 언급한 "
                    "문장 바로 아래에 접어 두었어요. 누르면 펼쳐지고, 'Table 2'·'Fig. 3' 표시에 마우스를 올리면 미리보기가 떠요.")
+    if parts:
+        part_nav_buttons(parts)            # 이전·다음은 본문 바로 끝에
+    st.markdown('<hr class="pp-end">', unsafe_allow_html=True)   # 본문 끝과 03 보조 자료를 나누는 선
 
     st.markdown('<div id="pp-03"></div>' + sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),
                 unsafe_allow_html=True)

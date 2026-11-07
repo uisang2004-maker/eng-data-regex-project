@@ -459,3 +459,17 @@ def test_mark_tooltip_has_no_duplicate_browser_title(at):
     out = md_text(at)
     assert 'data-tip="' in out
     assert not re.search(r'title="[^"]*" data-tip=', out)              # 브라우저 기본 툴팁과 겹치지 않게
+
+
+def test_many_parts_use_dropdown(blank):
+    secs = protocol_sections()
+    text = secs[2]["text"]
+    cuts = [text.index(f"{k} Add") for k in (1, 6, 11, 16, 21, 26, 31, 36)]
+    secs[2] = {**secs[2], "subheads": [f"Part {c}" for c in "ABCDEFGH"], "sub_at": cuts}
+    at = open_paper_doc(blank, secs)
+    next(g for g in at.get("button_group") if g.key == "paper_page").set_value("본문").run()
+    next(g for g in at.get("button_group") if g.key == "section_pick").set_value(1).run()
+    assert at.selectbox(key="part_pick").options[0].startswith("처음")   # 부분 9개: 버튼 대신 드롭다운
+    assert not any(g.key == "part_pick" for g in at.get("button_group"))
+    at.selectbox(key="part_pick").set_value(2).run()
+    assert not at.exception and 'class="pp-no">7<' in md_text(at)
