@@ -41,7 +41,7 @@ CHIPS = (("abbr", "약어", "blue"), ("hedge", "추측·가능성", "amber"), ("
 CHIP_RULE = {"abbr": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE",
              "definition": "DEFINITION", "term": "TERM", "number": "NUMBER"}     # 칩 → 켜고 끌 규칙
 CHIP_COLOR = {"blue": "blue", "amber": "orange", "teal": "green", "violet": "violet"}
-SK_CLAMP_CHARS = 280                 # 뼈대 카드 문장이 이보다 길면 6줄까지만 보이고 '전체 보기'
+SK_CLAMP_CHARS = 200                 # 뼈대 카드 문장이 이보다 길면 4줄까지만 보이고 '전체 보기'
 GLOSS_PREVIEW = 8                    # 단어표는 처음 8개만 보이고 나머지는 '전체 단어표 보기'로
 TIMES = re.compile(r"(\d+)번")      # 반복 용어 표시 설명에서 등장 횟수
 READ_MODES = ("side", "pair", "en", "ko")      # 읽기 모드: 한영 나란히 / 문장마다 한영 / 원문만 / 한국어만
@@ -233,9 +233,11 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-m.definition { color:#205f90; background:#eaf3fb; border-bottom:1px solid #7ca9ca; }
 .pp-m.number { color:#1c756d; background:#e8f5f1; }
 .pp-m.term { color:inherit; font-weight:650; background:transparent; padding:0; border-bottom:1.5px solid #7ca9ca; border-radius:0; }
-.pp-m:hover::after, .pp-m:focus::after { content: attr(data-tip); position:absolute; left:0; top:calc(100% + 6px); z-index:20;
+/* 설명창은 단어 위쪽에 띄운다: 아래에 띄우면 곧 읽을 다음 줄을 가린다(카드 안은 위가 잘리므로 아래) */
+.pp-m:hover::after, .pp-m:focus::after { content: attr(data-tip); position:absolute; left:0; bottom:calc(100% + 6px); z-index:20;
   background:#17293f; color:#fff; font-size:12px; font-weight:500; line-height:1.45; padding:7px 9px; border-radius:7px;
   width:max-content; max-width:300px; white-space:normal; box-shadow:0 6px 16px rgba(0,0,0,.18); }
+.pp-card .pp-m:hover::after, .pp-card .pp-m:focus::after { top:calc(100% + 6px); bottom:auto; }
 .pp-banner { margin:-14px -16px 10px; padding:9px 16px; background:#f3f8fb; color:#536f86; font-size:12px; border-bottom:1px solid #edf0f4; }
 .pp-notice { color:#52677f; font-size:13px; line-height:1.6; background:#fbfdff; border:1px dashed #d6e1ea; border-radius:10px; padding:12px 14px; margin-bottom:10px; }
 
@@ -300,7 +302,7 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-nav-label { font-size:12px; font-weight:750; color:#2c4560; margin:6px 0 3px; }
 .pp-sk-more summary { list-style:none; cursor:pointer; }
 .pp-sk-more summary::-webkit-details-marker { display:none; }
-.pp-sk-more .pp-sk-text { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+.pp-sk-more .pp-sk-text { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
 .pp-sk-more[open] .pp-sk-text { display:block; -webkit-line-clamp:unset; }
 .pp-more-btn { display:inline-block; margin-top:4px; font-size:12px; font-weight:700; color:#3979b5; }
 .pp-sk-more[open] .pp-more-btn:after { content:" 접기"; } .pp-sk-more[open] .pp-more-btn { font-size:0; }
@@ -826,7 +828,7 @@ def render_layers(text: str, spans, underline=None) -> str:
         if sp:
             tip = esc(sp[3])
             extra = sp[4] if len(sp) > 4 else ""        # 표·그림 미리보기처럼 표시 안에 넣을 HTML
-            out.append(f'<span class="{sp[2]}" tabindex="0" title="{tip}" data-tip="{tip}" aria-label="{tip}">'
+            out.append(f'<span class="{sp[2]}" tabindex="0" data-tip="{tip}" aria-label="{tip}">'
                        f'{esc(text[x:y])}{extra}</span>')
         else:
             out.append(esc(text[x:y]))
@@ -939,7 +941,7 @@ def skeleton_card(card, a, ko: str | None = None, ko_ul=None) -> str:
         ul = card_underlines(a).get(card.sentence_idx, [])
         body = (f'<div class="pp-sk-text"><span class="pp-sk-no">문장 {card.sentence_idx + 1}</span>'
                 f'{render_layers(s, spans, ul)}</div>')
-        if len(s) > SK_CLAMP_CHARS:        # 아주 긴 문장은 6줄까지만 보이고 눌러서 전체(세 카드 높이를 맞춤)
+        if len(s) > SK_CLAMP_CHARS:        # 긴 문장은 4줄까지만 보이고 눌러서 전체(세 카드 높이를 맞춤)
             body = f'<details class="pp-sk-more"><summary>{body}<span class="pp-more-btn">전체 보기</span></summary></details>'
         if ko:
             body += f'<div class="pp-sk-ko">{render_layers(ko, [], ko_ul)}</div>'
@@ -1592,7 +1594,9 @@ def part_nav_buttons(parts) -> None:
     prev_col, mid_col, next_col = st.columns([1, 0.6, 1], vertical_alignment="center")
     if k > 0:
         prev_col.button(f"◀ 이전 부분: {parts[k - 1][0]}", key="part_prev", on_click=go_part, args=(k - 1,))
-    mid_col.markdown(f'<div class="pp-meta" style="text-align:center">{k + 1} / {len(parts)} 부분</div>',
+    sec = section_now()
+    where = f"{sec.title} 안 " if sec is not None else ""
+    mid_col.markdown(f'<div class="pp-meta" style="text-align:center">{esc(where)}{k + 1} / {len(parts)} 부분</div>',
                      unsafe_allow_html=True)
     if k + 1 < len(parts):
         with next_col.container(key="part_next_box"):
@@ -1645,7 +1649,7 @@ def interleaved_panel(a) -> None:
               if res and s.idx < len(res.ko) else "")
         rows.append(f'<div class="pp-sent pp-pair"><div class="pp-no">{s.idx + 1}</div><div>'
                     f'<div class="pp-pair-en">{en_html(a, s, uls)}</div>{ko}</div></div>{float_cards(s.idx, ctx)}')
-    note = "" if res else '<span class="pp-meta"> · 아래 번역 칸에서 번역하면 문장마다 한국어가 붙어요</span>'
+    note = "" if res else '<span class="pp-meta"> · 위 번역 칸에서 번역하면 문장마다 한국어가 붙어요</span>'
     st.markdown(f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
                 f'<span class="pp-lang">EN·KO</span>문장마다 한영 <span class="pp-meta">· {len(a.sentences)}문장</span>'
                 f'{note}</div></div><div class="pp-sents">{"".join(rows)}</div></div>', unsafe_allow_html=True)
@@ -1825,8 +1829,8 @@ def reading_page() -> None:
         else:
             side_panel(a)                  # 문장 짝마다 한 행: 영어·한국어 높이가 같이 늘어 끝까지 어긋나지 않는다
     elif mode == "pair":
+        translation_panel(a, rows_on=False, where="아래 원문 문장마다 바로 아래에")   # 번역하기 버튼을 문장 목록 위에
         interleaved_panel(a)
-        translation_panel(a, rows_on=False, where="위 원문 문장마다 바로 아래에")
     elif mode == "en":
         st.markdown(en_panel, unsafe_allow_html=True)      # 한 언어만 볼 때는 줄이 너무 길지 않게 가운데 좁은 폭
     else:

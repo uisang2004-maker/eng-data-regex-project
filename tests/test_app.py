@@ -1,5 +1,6 @@
 """Streamlit 화면 상태 테스트(AppTest). 네트워크를 쓰지 않는다."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -452,3 +453,9 @@ def test_long_skeleton_sentence_is_clamped():
     a = analyze(long)
     card = next(c for c in a.skeleton if c.sentence_idx is not None)
     assert len(long) > SK_CLAMP_CHARS and 'class="pp-sk-more"' in skeleton_card(card, a)
+
+
+def test_mark_tooltip_has_no_duplicate_browser_title(at):
+    out = md_text(at)
+    assert 'data-tip="' in out
+    assert not re.search(r'title="[^"]*" data-tip=', out)              # 브라우저 기본 툴팁과 겹치지 않게
