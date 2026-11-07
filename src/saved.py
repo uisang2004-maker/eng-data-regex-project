@@ -122,7 +122,8 @@ def doc_record(kind: str, title: str, sections: list[dict], extra: dict | None =
     PDF 파일과 표·그림 이미지는 담지 않는다(크고, 같은 PDF를 다시 넣으면 다시 만든다)."""
     body = "\x1f".join(s["text"] for s in sections)
     return {"id": text_hash(kind + "\x1f" + body), "kind": kind, "title": title[:200], "ts": now or time.time(),
-            "sections": [{"title": s["title"], "text": s["text"], "subheads": list(s.get("subheads") or [])}
+            "sections": [{"title": s["title"], "text": s["text"], "subheads": list(s.get("subheads") or []),
+                          "sub_at": [int(x) for x in (s.get("sub_at") or [])]}
                          for s in sections], **(extra or {})}
 
 

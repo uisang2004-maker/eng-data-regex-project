@@ -289,6 +289,17 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-float details[open] .pp-thumb { display:none; }
 .pp-float-head { font-size:13px; color:#2c4560; }
 .pp-float-cap { font-size:12.5px; color:#4a5d72; line-height:1.5; margin:3px 0 6px; }
+.pp-float { padding:5px 12px; }
+.pp-float-short { font-size:12px; color:#5b6d80; margin-left:4px; }
+.pp-float details[open] .pp-float-short { display:none; }
+/* 한 언어만 볼 때(영어 원문만·한국어만): 한 줄이 너무 길지 않게 가운데 좁은 폭 */
+.pp-narrow, .st-key-ko_only { max-width:880px; margin-left:auto !important; margin-right:auto !important; }
+.pp-jump { margin-left:10px; font-size:12px; font-weight:700; color:#3979b5; text-decoration:none; white-space:nowrap; }
+#pp-03 { scroll-margin-top:72px; }
+.pp-proto-list { margin:6px 0 0; padding-left:0; list-style:none; }
+.pp-proto-list li { font-size:13px; line-height:1.55; padding:5px 0; border-top:1px dashed #e3e9f0; }
+.pp-proto-list li:first-child { border-top:0; }
+.pp-proto-tag { font-weight:800; color:#a8641a; }
 .pp-float .pp-thumb { border:1px solid #e6e9f0; border-radius:4px; }
 .pp-float .pp-full { margin-top:6px; border:1px solid #e6e9f0; border-radius:4px; }
 .pp-m:has(.pp-pop) { position:relative; }
@@ -461,7 +472,7 @@ def loaded_bar(a) -> None:
         with c4.popover("읽기 도우미", icon=":material/menu_book:", use_container_width=True):
             reading_helper(a)
         c1.markdown(f'<div class="pp-loaded"><span class="pp-loaded-label">지금 읽는 자료</span>'
-                    f'{esc(source_flag())}</div>', unsafe_allow_html=True)
+                    f'{esc(source_flag())}<a class="pp-jump" href="#pp-03">03 자료로 ↓</a></div>', unsafe_allow_html=True)
         ss = st.session_state
         items = SV.pack_items(ss.translations, ss.ai_gloss)
         c3.download_button("결과 파일 내려받기", SV.to_file(items, ss.source.get("title", ""), ss.browser_docs),
@@ -553,7 +564,8 @@ def doc_progress(rec: dict) -> tuple[int, int]:
 
 def paper_from_doc(rec: dict) -> Paper:
     return Paper(title=rec.get("title", ""), notes=list(rec.get("notes") or []),
-                 sections=[Section(s.get("title", ""), text=s["text"], subheads=list(s.get("subheads") or []))
+                 sections=[Section(s.get("title", ""), text=s["text"], subheads=list(s.get("subheads") or []),
+                                   sub_at=[int(x) for x in (s.get("sub_at") or [])])
                            for s in rec["sections"]])
 
 
@@ -700,7 +712,8 @@ def load_pdf(data: bytes, name: str) -> str | None:
     set_view()
     ss.show_input = False
     remember_doc(SV.doc_record("pdf", paper.title or name,
-                               [{"title": s.title, "text": s.text, "subheads": s.subheads} for s in paper.sections],
+                               [{"title": s.title, "text": s.text, "subheads": s.subheads, "sub_at": s.sub_at}
+                                for s in paper.sections],
                                {"notes": paper.notes}))
     return None
 
@@ -1398,10 +1411,12 @@ def float_cards(i: int, ctx, ko: bool = False) -> str:
         label = f"{'표' if t.kind == 'table' else '그림'} {t.num}" if ko else t.label
         where = " · 쪽 전체(영역을 찾지 못함)" if t.whole_page else ""
         cap = t.caption if len(t.caption) <= 160 else t.caption[:159] + "…"
+        # 기본은 한 줄(이름·쪽·캡션 앞부분)로 접어 두어 문장 흐름을 끊지 않는다. 누르면 원래 크기로 펼친다
+        short = cap if len(cap) <= 70 else cap[:69] + "…"
         out.append(f'<div class="pp-float"><details><summary><div class="pp-float-head">{icon} <b>{esc(label)}</b>'
-                   f' <span class="pp-meta">· {t.page}쪽{where} · 누르면 크게</span></div>'
-                   f'<div class="pp-float-cap">{esc(cap)}</div>{float_box(key, t, "pp-thumb", 640, 170)}</summary>'
-                   f'{float_box(key, t, "pp-full", 900)}</details></div>')
+                   f' <span class="pp-meta">· {t.page}쪽{where} · 펼치기</span>'
+                   f' <span class="pp-float-short">{esc(short)}</span></div></summary>'
+                   f'<div class="pp-float-cap">{esc(cap)}</div>{float_box(key, t, "pp-full", 900)}</details></div>')
     return "".join(out)
 
 
@@ -1423,6 +1438,140 @@ def float_pop(phrase: str, sent_idx: int | None, ctx) -> tuple[str, str]:
     return "", ""
 
 
+LONG_SENTS = 40                       # 문장이 이보다 많은 글은 나눠 읽는다
+PART_SENTS = 30                       # 소제목 위치를 모를 때 한 부분의 문장 수
+
+
+def section_now():
+    """지금 읽는 PDF 절(본문 쪽에서 절 하나를 고른 경우). 아니면 None."""
+    ss = st.session_state
+    ids = ss.source.get("section_ids") or []
+    if ss.get("paper") is None or ss.source.get("kind") != "pdf" or len(ids) != 1:
+        return None
+    return ss.paper.sections[ids[0]]
+
+
+def fallback_ok() -> bool:
+    """위치로 대신 고르는 뼈대 카드(첫 문장=분야 배경 등)를 써도 되는 글: 초록·서론·결론 쪽, PDF가 아닌 글."""
+    ss = st.session_state
+    if ss.source.get("kind") != "pdf" or ss.source.get("page") != "본문":
+        return True
+    sec = section_now()
+    return sec is None or bool(P.FALLBACK_TITLE.match(sec.title))
+
+
+def protocol_section(a) -> bool:
+    """실험 절차 절: 제목이 Procedure·Materials·Timing 등이거나, 원문에 주의·멈춤 지점 표시가 3개 이상."""
+    sec = section_now()
+    if sec is not None and P.PROTO_SECTION.match(sec.title):
+        return True
+    return sum(bool(P.PROTO_CAUTION.search(s.text) or P.PROTO_PAUSE.search(s.text)) for s in a.sentences) >= 3
+
+
+def protocol_cards(a) -> None:
+    """절차 요점 카드 3장: 주의(CRITICAL·CAUTION) · 멈춤 지점(PAUSE POINT) · 단계와 소요 시간. 모두 원문 문장 그대로."""
+    def items(pat, limit=3):
+        hits = [s for s in a.sentences if pat.search(s.text)]
+        lis = []
+        for s in hits[:limit]:
+            m = pat.search(s.text)
+            body = (esc(s.text[:m.start()]) + f'<span class="pp-proto-tag">{esc(m.group())}</span>'
+                    + esc(s.text[m.end():][:220]) + ("…" if len(s.text) - m.end() > 220 else ""))
+            lis.append(f'<li><span class="pp-sk-no">문장 {s.idx + 1}</span>{body}</li>')
+        return hits, "".join(lis)
+
+    sec = section_now()
+    steps = [int(m.group("n")) for m in P.PROTO_STEP.finditer(a.text)]
+    timed = [h for h in (sec.subheads if sec else []) if "Timing" in h]
+    cards = []
+    for kind, title, color, pat, none_msg in (
+            ("caution", "주의 · CRITICAL·CAUTION", "blue", P.PROTO_CAUTION, "이 절에는 주의(CRITICAL·CAUTION) 표시가 없어요."),
+            ("pause", "멈춤 지점 · PAUSE POINT", "teal", P.PROTO_PAUSE, "이 절에는 멈춰도 되는 지점(PAUSE POINT) 표시가 없어요.")):
+        hits, lis = items(pat)
+        body = (f'<ul class="pp-proto-list">{lis}</ul>' if hits else f'<div class="pp-sk-missing">{none_msg}</div>')
+        more = f" · 처음 3개만" if len(hits) > 3 else ""
+        cards.append((title, color, f"{len(hits)}개{more}", body))
+    hits, lis = items(P.PROTO_TIMING)
+    head = []
+    if steps:
+        head.append(f"<li>번호 단계 <b>{min(steps)}–{max(steps)}</b> · {len(set(steps))}개</li>")
+    head += [f"<li>{esc(h)}</li>" for h in timed[:3]]
+    body = f'<ul class="pp-proto-list">{"".join(head)}{lis}</ul>' if head or hits else         '<div class="pp-sk-missing">이 절에는 번호 단계나 소요 시간 표시가 없어요.</div>'
+    cards.append(("단계 · 소요 시간", "violet", f"단계 {len(set(steps))}개", body))
+    for col, (title, color, count, body) in zip(st.columns(3), cards):
+        col.markdown(f'<div class="pp-panel pp-card {color}"><div class="pp-card-head"><div class="pp-kind">'
+                     f'<span class="pp-kdot"></span>{title}</div><div class="pp-basis signal">{esc(count)}</div></div>'
+                     f'{body}<div class="pp-reason">{ICON["info"]}<span>실험 절차 절이라 문제·방법·결과 대신 원문에 '
+                     f'표시된 요점을 보여 줘요.</span></div></div>', unsafe_allow_html=True)
+
+
+def reading_parts(a) -> list[tuple[str, int, int]]:
+    """긴 글을 나눠 읽을 부분 [(이름, 시작 문장, 끝 문장(제외))]. 소제목 위치를 알면 소제목마다, 모르면 30문장씩.
+    짧은 글이나 나눌 곳이 없으면 []."""
+    n = len(a.sentences)
+    if n <= LONG_SENTS:
+        return []
+    starts: dict[int, str] = {}
+    sec = section_now()
+    if sec is not None and sec.text == a.text:
+        for name, at in zip(sec.subheads, sec.sub_at):
+            i = next((s.idx for s in a.sentences if s.end > at), None) if at >= 0 else None
+            if i is not None:
+                starts.setdefault(i, name)
+    if len(starts) >= 2 or (starts and 0 not in starts):
+        starts.setdefault(0, "처음")
+        idx = sorted(starts)
+        parts = [(starts[i], i, idx[k + 1] if k + 1 < len(idx) else n) for k, i in enumerate(idx)]
+    else:
+        parts = [(f"문장 {i + 1}–{min(i + PART_SENTS, n)}", i, min(i + PART_SENTS, n)) for i in range(0, n, PART_SENTS)]
+    return parts if len(parts) > 1 else []
+
+
+def part_picker(a) -> list[tuple[str, int, int]]:
+    """긴 글이면 '읽을 부분' 버튼을 보이고 고른 범위를 기억한다. 번역·형광펜·뼈대는 글 전체 그대로."""
+    ss = st.session_state
+    key = text_key(a.text)
+    parts = reading_parts(a)
+    if not parts:
+        ss.part_range = {key: (0, len(a.sentences))}
+        return []
+    if ss.get("part_of") != key or ss.get("part_pick") is None or ss.part_pick >= len(parts):
+        ss.part_of = key
+        ss.part_pick = ss.get("part_last", 0) if ss.get("part_of_last") == key else 0
+    by_sub = not parts[0][0].startswith("문장 ")
+    labels = {k: f"{name} · {hi - lo}문장" for k, (name, lo, hi) in enumerate(parts)}
+    with st.container(key="part_bar"):
+        st.caption(f"이 글은 {len(a.sentences)}문장이라 {'소제목' if by_sub else '30문장'} 단위로 나눠 보여 줘요. "
+                   "번역·형광펜·뼈대는 글 전체 기준이에요.")
+        st.pills("읽을 부분", list(range(len(parts))), format_func=labels.get, key="part_pick",
+                 label_visibility="collapsed")
+    k = ss.part_pick if ss.part_pick is not None else 0
+    ss.part_last, ss.part_of_last = k, key
+    ss.part_range = {key: parts[k][1:]}
+    return parts
+
+
+def go_part(k: int) -> None:
+    st.session_state.part_pick = k
+
+
+def next_part_button(parts) -> None:
+    k = st.session_state.get("part_pick") or 0
+    if k + 1 < len(parts):
+        st.button(f"다음 부분: {parts[k + 1][0]} ▶", key="part_next", on_click=go_part, args=(k + 1,))
+
+
+def shown(a):
+    """지금 보여 줄 문장들(긴 글이면 고른 부분만)."""
+    lo, hi = st.session_state.get("part_range", {}).get(text_key(a.text), (0, len(a.sentences)))
+    return a.sentences[lo:hi]
+
+
+def in_part(a, i: int) -> bool:
+    lo, hi = st.session_state.get("part_range", {}).get(text_key(a.text), (0, len(a.sentences)))
+    return lo <= i < hi
+
+
 def side_panel(a) -> None:
     """한영 나란히: 문장 짝마다 한 행(왼쪽 영어, 오른쪽 한국어). 두 칸을 따로 그리면 줄 수 차이가 쌓여
     뒤쪽 문장이 어긋나므로 행 단위로 묶는다. 표·그림 카드는 그 문장 짝 아래에 한 번."""
@@ -1436,7 +1585,7 @@ def side_panel(a) -> None:
     rows = [f'<div class="pp-side-row"><div class="pp-no">{s.idx + 1}</div>'
             f'<div class="pp-side-en">{en_html(a, s, uls)}</div>'
             f'<div class="pp-side-ko">{ko_html(res, s.idx, a, off) if res and s.idx < len(res.ko) else ""}</div></div>'
-            f'{float_cards(s.idx, ctx)}' for s in a.sentences]
+            f'{float_cards(s.idx, ctx)}' for s in shown(a)]
     st.markdown(f'<div class="pp-panel"><div class="pp-side-head"><div></div>'
                 f'<div class="pp-reader-title"><span class="pp-lang">EN</span>영어 원문 '
                 f'<span class="pp-meta">· {len(a.sentences)}문장</span></div>'
@@ -1453,7 +1602,7 @@ def interleaved_panel(a) -> None:
     uls = card_underlines(a)
     rows = []
     ctx = cur_float_ctx(a)
-    for s in a.sentences:
+    for s in shown(a):
         ko = (f'<div class="pp-pair-ko"><span class="pp-lang">KO</span>{ko_html(res, s.idx, a, off)}</div>'
               if res and s.idx < len(res.ko) else "")
         rows.append(f'<div class="pp-sent pp-pair"><div class="pp-no">{s.idx + 1}</div><div>'
@@ -1516,7 +1665,7 @@ def translation_panel(a, rows_on: bool = True, floats_on: bool = False, where: s
         if res.ko is not None and rows_on:
             ctx = cur_float_ctx(a)
             rows = [f'<div class="pp-sent pp-ko"><div class="pp-no">{i + 1:02d}</div><div>{ko_html(res, i, a, off)}</div></div>'
-                    + (float_cards(i, ctx, ko=True) if floats_on else "") for i in range(len(res.ko))]
+                    + (float_cards(i, ctx, ko=True) if floats_on else "") for i in range(len(res.ko)) if in_part(a, i)]
             st.markdown(f'<div class="pp-sents" style="padding:0">{"".join(rows)}</div>', unsafe_allow_html=True)
         elif res.ko is not None:
             st.markdown(f'<div class="pp-meta">번역 문장은 {where} 보여요.</div>', unsafe_allow_html=True)
@@ -1576,7 +1725,10 @@ def reading_page() -> None:
         return                             # 입력 칸이 열려 있는 동안은 결과 창을 숨긴다
 
     # 자료를 넣은 뒤: 큰 제목 없이, 스크롤해도 위에 붙어 있는 막대 하나(읽기 도우미·결과 파일·다시 넣기)
-    a = analyze(ss.input_text, frozenset(ss.active_rules))
+    rules = set(ss.active_rules)
+    if not fallback_ok():
+        rules.discard("SK_FALLBACK")       # 본문 절의 첫 문장은 '분야 배경'이 아니므로 위치로 대신 고르지 않는다
+    a = analyze(ss.input_text, frozenset(rules))
     loaded_bar(a)
     if ss.paper is not None and ss.source["kind"] == "pdf":
         paper_overview(ss.paper)
@@ -1585,15 +1737,20 @@ def reading_page() -> None:
     ss.float_ctx = {text_key(a.text): (floats, first, {s.start: s.idx for s in a.sentences})}
 
     where = f" · {ss.source['section']}" if ss.source["kind"] == "pdf" else ""
-    st.markdown(sec_head("01", f"먼저 읽을 3줄 뼈대{where}", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
-                unsafe_allow_html=True)
-    cols = st.columns(3)
-    tr = ss.translations.get((text_key(a.text), True))
-    for col, card in zip(cols, a.skeleton):
-        i = card.sentence_idx
-        ko = tr.ko[i] if tr and tr.ko and i is not None and i < len(tr.ko) else None
-        ko_ul = as_wrappers(tr.ko_underlines[i]) if ko and tr.ko_underlines and i < len(tr.ko_underlines) else None
-        col.markdown(skeleton_card(card, a, ko, ko_ul), unsafe_allow_html=True)
+    if protocol_section(a):                # 실험 절차 절: 문제·방법·결과 대신 원문의 주의·멈춤 지점·소요 시간 표시
+        st.markdown(sec_head("01", f"먼저 볼 실험 절차 요점{where}", "원문에 표시된 주의·멈춤 지점·소요 시간 · 정규식으로 찾음"),
+                    unsafe_allow_html=True)
+        protocol_cards(a)
+    else:
+        st.markdown(sec_head("01", f"먼저 읽을 3줄 뼈대{where}", "원문에서 찾은 문장 · 신호 문구와 선택 이유를 함께 표시"),
+                    unsafe_allow_html=True)
+        cols = st.columns(3)
+        tr = ss.translations.get((text_key(a.text), True))
+        for col, card in zip(cols, a.skeleton):
+            i = card.sentence_idx
+            ko = tr.ko[i] if tr and tr.ko and i is not None and i < len(tr.ko) else None
+            ko_ul = as_wrappers(tr.ko_underlines[i]) if ko and tr.ko_underlines and i < len(tr.ko_underlines) else None
+            col.markdown(skeleton_card(card, a, ko, ko_ul), unsafe_allow_html=True)
     if a.limit_idx:
         st.markdown(f'<div class="pp-limit">한계·향후 과제 문장: {", ".join("문장 " + str(i + 1) for i in a.limit_idx)}</div>',
                     unsafe_allow_html=True)
@@ -1612,13 +1769,14 @@ def reading_page() -> None:
         st.segmented_control("읽기 모드", READ_MODES, key="read_mode", format_func=lambda m: READ_MODE_LABEL[m],
                              label_visibility="collapsed")
     mode = ss.read_mode or READ_MODES[0]       # 같은 버튼을 다시 눌러 선택이 풀려도 기본 모드로 보여 준다
+    parts = part_picker(a)                     # 긴 글은 소제목(없으면 30문장) 단위로 나눠 읽는다
     uls = card_underlines(a)
     ctx = cur_float_ctx(a)
     if ctx[0]:
         st.markdown(float_style(ctx[0]), unsafe_allow_html=True)   # 이 글이 언급한 표·그림 이미지(한 번만)
     rows = "".join(f'<div class="pp-sent"><div class="pp-no">{s.idx + 1}</div>{en_html(a, s, uls)}</div>'
-                   f'{float_cards(s.idx, ctx)}' for s in a.sentences)   # 처음 언급한 문장 바로 아래에 표·그림
-    en_panel = (f'<div class="pp-panel"><div class="pp-reader-head"><div class="pp-reader-title">'
+                   f'{float_cards(s.idx, ctx)}' for s in shown(a))   # 처음 언급한 문장 바로 아래에 표·그림
+    en_panel = (f'<div class="pp-panel pp-narrow"><div class="pp-reader-head"><div class="pp-reader-title">'
                 f'<span class="pp-lang">EN</span>영어 원문 <span class="pp-meta">· {len(a.sentences)}문장</span></div>'
                 f'<div class="pp-meta">표현에 마우스를 올리거나 Tab으로 이동하면 정의와 규칙이 보여요</div></div>'
                 f'<div class="pp-sents">{rows or "<div class=pp-meta>문장이 없어요.</div>"}</div></div>')
@@ -1629,14 +1787,17 @@ def reading_page() -> None:
         interleaved_panel(a)
         translation_panel(a, rows_on=False, where="위 원문 문장마다 바로 아래에")
     elif mode == "en":
-        st.markdown(en_panel, unsafe_allow_html=True)
+        st.markdown(en_panel, unsafe_allow_html=True)      # 한 언어만 볼 때는 줄이 너무 길지 않게 가운데 좁은 폭
     else:
-        translation_panel(a, floats_on=True)
+        with st.container(key="ko_only"):
+            translation_panel(a, floats_on=True)
+    if parts:
+        next_part_button(parts)
     if ctx[0]:
         st.caption(f"이 글에 나온 표·그림 {len(ctx[0])}개({', '.join(t.label for t in ctx[0].values())})는 처음 언급한 "
-                   "문장 바로 아래에 넣었어요. 'Table 2'·'Fig. 3' 표시에 마우스를 올리면 미리보기가 떠요.")
+                   "문장 바로 아래에 접어 두었어요. 누르면 펼쳐지고, 'Table 2'·'Fig. 3' 표시에 마우스를 올리면 미리보기가 떠요.")
 
-    st.markdown(sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),
+    st.markdown('<div id="pp-03"></div>' + sec_head("03", "이해를 돕는 자료", "흐름도·단어표 — 정규식이 찾은 결과를 한눈에 모은 것"),
                 unsafe_allow_html=True)
     tr = ss.translations.get((text_key(a.text), True))
     rows = G.build(a, G.korean_marks(tr))

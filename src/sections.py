@@ -30,6 +30,8 @@ class Section:
     subheads: list[str] = field(default_factory=list)
     dropped: int = 0                            # 뺀 조각(각주·캡션·표) 수
     paras: list[list[str]] = field(default_factory=list)
+    sub_at: list[int] = field(default_factory=list)   # 소제목마다 본문(text) 안 시작 위치(못 찾으면 -1)
+    sub_paras: list[int] = field(default_factory=list)  # 나누는 동안만: 소제목 다음 문단 번호
 
 
 @dataclass
@@ -136,6 +138,16 @@ def _continues(kept: list[list[str]], para: list[str]) -> bool:
             and not SENT_END.search(kept[-1][-1].lstrip(SMALL_MARK).rstrip()))
 
 
+def _locate(text: str, kept: list[list[str]], kept_at: list[int], para_no: int) -> int:
+    """소제목 바로 뒤 문단이 정리된 본문(text)에서 시작하는 위치. 그 문단의 첫 낱말 여섯 개로 찾고, 못 찾으면 -1."""
+    nxt = next((j for j, k in enumerate(kept_at) if k >= para_no), None)
+    if nxt is None:
+        return -1
+    words = " ".join(ln.lstrip(SMALL_MARK) for ln in kept[nxt]).split()[:6]
+    m = re.search(r"\s+".join(re.escape(w) for w in words), text) if words else None
+    return m.start() if m else -1
+
+
 def _join(paras: list[list[str]]) -> str:
     """끊긴 문단 다시 잇기: 앞 문단이 문장부호로 끝나지 않으면 한 줄 개행으로 붙인다(하이픈 복원이 동작하도록)."""
     out = ""
@@ -237,6 +249,7 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
             if kind == "sub":
                 if cur is not None and name not in cur.subheads:     # 같은 소제목은 한 번만
                     cur.subheads.append(name)
+                    cur.sub_paras.append(len(cur.paras))
                 continue
             m = P.SEC_NUM_HEAD.match(P.SMALL_CAPS_HEAD.sub(r"\1", line))
             if m:
@@ -273,12 +286,15 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
         # 초록을 통째로 작은 글자로 쓰는 형식(IEEE)만 작은 글자를 남긴다. 섞여 있으면 작은 쪽은 각주로 본다
         all_small = all(sum(ln.startswith(SMALL_MARK) for ln in p) * 2 > len(p) for p in s.paras)
         kept: list[list[str]] = []
-        for p in s.paras:
+        kept_at: list[int] = []                  # 남긴 문단의 원래 번호(소제목 위치를 찾는 데 씀)
+        for k, p in enumerate(s.paras):
             if not _is_noise(p, keep_small=s.title == "Abstract" and all_small) or _continues(kept, p):
                 kept.append(p)
+                kept_at.append(k)
         s.dropped = len(s.paras) - len(kept)
         s.text = clean(P.EMAIL.sub("", _join(kept))).text     # 긴 문단 속 이메일도 지운다
-        s.paras = []
+        s.sub_at = [_locate(s.text, kept, kept_at, k) for k in s.sub_paras]
+        s.paras, s.sub_paras = [], []
     sections = [s for s in sections if s.text]
     return Paper(title=title, sections=sections, notes=notes)
 

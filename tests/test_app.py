@@ -380,3 +380,51 @@ def test_reading_helper_in_sticky_bar(at):
     out = "\n".join(m.value for m in at.markdown)
     assert "**RAG** → Retrieval-augmented generation" in out           # 팝오버 안 약어 목록
     assert "pp-intro" not in out or "ACADEMIC READING WORKSPACE" not in out.split("pp-loaded")[0]
+
+
+def open_paper_doc(blank, sections):
+    """절 목록으로 저장된 PDF 문서를 만들어 다시 연 화면."""
+    from src import saved as SV
+    rec = SV.doc_record("pdf", "A Protocol Paper", sections)
+    blank.session_state["browser_docs"] = {rec["id"]: rec}
+    blank.run()
+    blank.button(key=f"doc_open_{rec['id']}").click().run()
+    assert not blank.exception, blank.exception
+    return blank
+
+
+def protocol_sections():
+    para = "\n\n"
+    steps = para.join(f"{k} Add the simulated fluid to the sample and mix it well for one minute." for k in range(1, 46))
+    proc = ("CRITICAL STEP Prepare the salivary fluid fresh on the day of the experiment." + para + steps + para +
+            "PAUSE POINT Samples can be frozen at minus twenty degrees." + para + "CAUTION Bile is toxic if swallowed.")
+    return [{"title": "Abstract", "text": "We present a static digestion method for foods. It uses standard tools."},
+            {"title": "Introduction", "text": "Food digestion matters. We study it in the lab."},
+            {"title": "Procedure", "text": proc, "subheads": ["Preparation", "Digestion procedure · Timing 5–8 h"],
+             "sub_at": [0, proc.index("20 Add")]},
+            {"title": "Conclusion", "text": "The method works well."}]
+
+
+def test_protocol_section_shows_procedure_cards_and_parts(blank):
+    at = open_paper_doc(blank, protocol_sections())
+    next(g for g in at.get("button_group") if g.key == "paper_page").set_value("본문").run()
+    next(g for g in at.get("button_group") if g.key == "section_pick").set_value(1).run()
+    assert not at.exception, at.exception
+    out = "\n".join(m.value for m in at.markdown)
+    assert "먼저 볼 실험 절차 요점" in out and "먼저 읽을 3줄 뼈대" not in out
+    assert "CRITICAL STEP" in out and "PAUSE POINT" in out and "번호 단계 <b>1–45</b>" in out
+    parts = next(g for g in at.get("button_group") if g.key == "part_pick")
+    assert [o.split(" · ")[0] for o in parts.options] == ["Preparation", "Digestion procedure"]
+    assert 'class="pp-no">25<' not in out                               # 첫 부분(1~20번째 단계 문장)만 보인다
+    at.button(key="part_next").click().run()
+    assert 'class="pp-no">25<' in "\n".join(m.value for m in at.markdown)
+
+
+def test_body_section_has_no_position_fallback(blank):
+    secs = protocol_sections()
+    secs[2] = {"title": "3 Model", "text": "The encoder has six layers. Each layer has two sublayers."}
+    at = open_paper_doc(blank, secs)
+    next(g for g in at.get("button_group") if g.key == "paper_page").set_value("본문").run()
+    next(g for g in at.get("button_group") if g.key == "section_pick").set_value(1).run()
+    out = "\n".join(m.value for m in at.markdown)
+    assert "먼저 읽을 3줄 뼈대" in out and "분야 배경 (첫 문장)" not in out

@@ -451,6 +451,21 @@ SEC_FONT_HEAD = re.compile(r"^(?P<title>[A-Z][A-Za-z'’-]*(?:(?:,?\s+|:\s+)(?:[
 ``Analysis: A Contemporary Focus on Ibram X. Kendi``(콜론·머리글자). 워터마크처럼 여러 쪽에 반복되는 줄은
 pdf_text가 제목 후보에서 미리 뺀다."""
 
+PROTO_SECTION = re.compile(r"^(?:\d+\s+)?(?:Procedure|Materials|Reagents|Equipment|Reagent\s+setup|Equipment\s+setup|"
+                           r"Timing|Troubleshooting|Protocol)\b", re.I)
+"""실험 절차 절 제목(Nature Protocols 등). 이 절에서는 3줄 뼈대 대신 절차 요점 카드를 보여 준다."""
+
+PROTO_CAUTION = re.compile(r"\bCRITICAL(?:\s+STEP)?\b|!\s*CAUTION\b|\bCAUTION\b")
+PROTO_PAUSE = re.compile(r"\bPAUSE\s+POINT\b")
+PROTO_TIMING = re.compile(r"\bTiming\b|~\s?\d+(?:\.\d+)?\s?(?:min|h|d)\b")
+PROTO_STEP = re.compile(r"(?:^|(?<=[.!?)]\s))(?P<n>\d{1,2})\s+(?=[A-Z][a-z]|\()", re.M)
+"""프로토콜 원문에 정해진 모양으로 들어 있는 표시: 주의(``CRITICAL STEP``·``! CAUTION``), 멈춤 지점(``PAUSE POINT``),
+소요 시간(``Timing 5–8 h``·``~4 d``), 번호 단계(``7 Oral phase …``: 줄 첫머리나 문장 끝 바로 뒤의 번호).
+번호 단계는 문장 분리가 단계 사이를 나누지 않는 경우가 있어 문장이 아니라 글 전체에서 센다."""
+
+FALLBACK_TITLE = re.compile(r"^(?:\d+\s+)?(?:Abstract|Introduction|Background)\b", re.I)
+"""위치로 대신 고르는 뼈대 카드(첫 문장=배경 등)는 초록·서론·결론에서만 의미가 있다. 본문 절에서는 이 제목일 때만 쓴다."""
+
 HEAD_NOTE = re.compile(r"\s*[●•]?\s*Timing\s+\S.*$")
 """제목 줄 뒤에 붙은 소요 시간 안내(Nature Protocols): ``Digestion procedure ● Timing 5–8 h``. 제목은 앞부분만 보고,
 안내는 그 절 본문으로 남긴다."""
