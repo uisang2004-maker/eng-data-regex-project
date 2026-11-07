@@ -294,6 +294,8 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
 .pp-float details[open] .pp-float-short { display:none; }
 /* 한 언어만 볼 때(영어 원문만·한국어만): 한 줄이 너무 길지 않게 가운데 좁은 폭 */
 .pp-narrow, .st-key-ko_only { max-width:880px; margin-left:auto !important; margin-right:auto !important; }
+.st-key-part_next_box [data-testid="stButton"] { display:flex; justify-content:flex-end; }
+.st-key-part_bar { scroll-margin-top:72px; }   /* 위에 붙은 막대에 가리지 않게 */
 .pp-jump { margin-left:10px; font-size:12px; font-weight:700; color:#3979b5; text-decoration:none; white-space:nowrap; }
 #pp-03 { scroll-margin-top:72px; }
 .pp-proto-list { margin:6px 0 0; padding-left:0; list-style:none; }
@@ -1548,17 +1550,29 @@ def part_picker(a) -> list[tuple[str, int, int]]:
     k = ss.part_pick if ss.part_pick is not None else 0
     ss.part_last, ss.part_of_last = k, key
     ss.part_range = {key: parts[k][1:]}
+    if ss.pop("part_scroll", False):
+        ss.part_scroll_n = ss.get("part_scroll_n", 0) + 1   # 내용이 같으면 Streamlit이 다시 실행하지 않아 번호를 바꿔 넣는다
+        components.html(f"<script>/* {ss.part_scroll_n} */ const b = window.parent.document.querySelector('.st-key-part_bar');"
+                        "if (b) b.scrollIntoView({block: 'start'});</script>", height=0)
     return parts
 
 
 def go_part(k: int) -> None:
     st.session_state.part_pick = k
+    st.session_state.part_scroll = True      # 글 아래 버튼으로 넘기면 새 부분의 처음으로 올라간다
 
 
-def next_part_button(parts) -> None:
+def part_nav_buttons(parts) -> None:
+    """글 아래 '◀ 이전 부분 · 지금 몇 번째 · 다음 부분 ▶' 버튼(첫 부분엔 이전, 마지막 부분엔 다음이 없다)."""
     k = st.session_state.get("part_pick") or 0
+    prev_col, mid_col, next_col = st.columns([1, 0.6, 1], vertical_alignment="center")
+    if k > 0:
+        prev_col.button(f"◀ 이전 부분: {parts[k - 1][0]}", key="part_prev", on_click=go_part, args=(k - 1,))
+    mid_col.markdown(f'<div class="pp-meta" style="text-align:center">{k + 1} / {len(parts)} 부분</div>',
+                     unsafe_allow_html=True)
     if k + 1 < len(parts):
-        st.button(f"다음 부분: {parts[k + 1][0]} ▶", key="part_next", on_click=go_part, args=(k + 1,))
+        with next_col.container(key="part_next_box"):
+            st.button(f"다음 부분: {parts[k + 1][0]} ▶", key="part_next", on_click=go_part, args=(k + 1,))
 
 
 def shown(a):
@@ -1792,7 +1806,7 @@ def reading_page() -> None:
         with st.container(key="ko_only"):
             translation_panel(a, floats_on=True)
     if parts:
-        next_part_button(parts)
+        part_nav_buttons(parts)
     if ctx[0]:
         st.caption(f"이 글에 나온 표·그림 {len(ctx[0])}개({', '.join(t.label for t in ctx[0].values())})는 처음 언급한 "
                    "문장 바로 아래에 접어 두었어요. 누르면 펼쳐지고, 'Table 2'·'Fig. 3' 표시에 마우스를 올리면 미리보기가 떠요.")

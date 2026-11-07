@@ -416,8 +416,12 @@ def test_protocol_section_shows_procedure_cards_and_parts(blank):
     parts = next(g for g in at.get("button_group") if g.key == "part_pick")
     assert [o.split(" · ")[0] for o in parts.options] == ["Preparation", "Digestion procedure"]
     assert 'class="pp-no">25<' not in out                               # 첫 부분(1~20번째 단계 문장)만 보인다
+    assert not any(b.key == "part_prev" for b in at.button)           # 첫 부분에는 '이전'이 없다
     at.button(key="part_next").click().run()
     assert 'class="pp-no">25<' in "\n".join(m.value for m in at.markdown)
+    assert not any(b.key == "part_next" for b in at.button)           # 마지막 부분에는 '다음'이 없다
+    at.button(key="part_prev").click().run()                           # 이전 부분으로 돌아가기
+    assert 'class="pp-no">25<' not in "\n".join(m.value for m in at.markdown)
 
 
 def test_body_section_has_no_position_fallback(blank):
