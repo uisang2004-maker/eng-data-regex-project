@@ -38,6 +38,9 @@ MAX_PDF_MB = 20
 CHIPS = (("abbr", "약어", "blue"), ("hedge", "추측·가능성", "amber"), ("confident", "확신", "teal"),
          ("reference", "참조", "violet"), ("definition", "용어 설명", "blue"), ("term", "반복 용어", "blue"),
          ("number", "수치", "teal"))
+CHIP_RULE = {"abbr": "ABBR", "hedge": "HEDGE", "confident": "CONFIDENT", "reference": "REFERENCE",
+             "definition": "DEFINITION", "term": "TERM", "number": "NUMBER"}     # 칩 → 켜고 끌 규칙
+CHIP_COLOR = {"blue": "blue", "amber": "orange", "teal": "green", "violet": "violet"}
 GLOSS_PREVIEW = 8                    # 단어표는 처음 8개만 보이고 나머지는 '전체 단어표 보기'로
 TIMES = re.compile(r"(\d+)번")      # 반복 용어 표시 설명에서 등장 횟수
 READ_MODES = ("side", "pair", "en", "ko")      # 읽기 모드: 한영 나란히 / 문장마다 한영 / 원문만 / 한국어만
@@ -714,6 +717,33 @@ def on_rule_change(name: str) -> None:
     st.session_state.active_rules = rules
 
 
+def mark_chips(a) -> None:
+    """02 표시 칩: 누르면 그 종류의 형광펜만 켜고 끈다(색이 한꺼번에 많으면 읽기 피곤하므로).
+    끈 표시도 칩은 흐리게 남아 다시 켤 수 있다. 0개는 처음부터 숨긴다. 칩 색은 원문 형광펜 색."""
+    ss = st.session_state
+    full = a.counts if a.active_rules == P.DEFAULT_ACTIVE_RULES else analyze(a.text).counts   # 끈 표시도 개수는 그대로
+    opts = [k for k, _, _ in CHIPS if full[k]]
+    if not opts:
+        st.markdown('<div class="pp-chips"><span class="pp-meta">표시할 표현이 없어요</span></div>', unsafe_allow_html=True)
+        return
+    label = {k: f":{CHIP_COLOR[color]}[●] {name} {full[k]}" for k, name, color in CHIPS}
+    ss.mark_pills = [k for k in opts if CHIP_RULE[k] in ss.active_rules]   # 규칙 체크박스와 같은 상태를 쓴다
+    st.pills("형광펜 켜고 끄기", opts, selection_mode="multi", format_func=label.get, key="mark_pills",
+             on_change=on_chip_change, args=(tuple(opts),), label_visibility="collapsed",
+             help="누르면 그 표시의 형광펜을 끄고, 다시 누르면 켜요")
+
+
+def on_chip_change(opts: tuple) -> None:
+    ss = st.session_state
+    rules = set(ss.active_rules)
+    on = set(ss.mark_pills or [])
+    for k in opts:
+        name = CHIP_RULE[k]
+        (rules.add if k in on else rules.discard)(name)
+        ss[f"rule_{name}"] = k in on          # '읽기 전용 단계 보기'의 체크박스도 같이 맞춘다
+    ss.active_rules = rules
+
+
 def rule_toggles(container_cols: int = 3) -> None:
     seed_rule_widgets()
     cols = st.columns(container_cols)
@@ -980,10 +1010,10 @@ def paper_overview(paper) -> None:
     ss = st.session_state
     titles = [s.title for s in paper.sections]
     pages = paper_pages(paper)
-    st.markdown(sec_head("00", "논문 쪽 고르기", f"{len(titles)}개 절 · 약 {paper.chars:,}자 · 참고문헌·부록·각주·그림/표·저자 정보 제외"),
+    st.markdown(sec_head("00", "논문 쪽 고르기", f"{paper.title[:70]} · {len(titles)}개 절 · 약 {paper.chars:,}자"),
                 unsafe_allow_html=True)
-    st.markdown(f'<div class="pp-meta"><b>{esc(paper.title)}</b> · {esc(" ".join(paper.notes))}</div>',
-                unsafe_allow_html=True)
+    if paper.notes:
+        st.caption(" ".join(paper.notes))
     with st.container(key="paper_nav"):
         ss.setdefault("paper_page", ss.source.get("page"))     # 입력 칸을 열었다 닫으면 위젯 상태가 지워져 다시 채운다
         labels = {p: (f"{p} · {len(ids)}개 절" if p == "본문" else p) for p, ids in pages.items()}
@@ -1008,21 +1038,23 @@ def paper_overview(paper) -> None:
         now = ' style="background:#eef4fb"' if i in ss.source.get("section_ids", []) else ""
         rows.append(f"<tr{now}><td><b>{esc(sec.title)}</b></td><td>{len(a.sentences)}</td><td>{key}</td>"
                     f"<td>{subs}</td></tr>")
-    with st.expander("논문 전체 지도 · 절별 핵심 문장과 소제목"):
+    tables = ss.get("paper_tables") or []
+    figures = ss.get("paper_figures") or []
+    # 펼침 칸 셋을 하나로 묶어(안은 탭) 01 뼈대 카드가 첫 화면에 들어오게 한다
+    with st.expander(f"논문 전체 보기 · 절별 지도 · 표 {len(tables)}개·그림 {len(figures)}개 · 전체 단어표"):
+        st.caption("참고문헌·부록·각주·그림/표 안 글자·저자 정보는 분석에서 뺐어요.")
+        tab_map, tab_fl, tab_gl = st.tabs(["절별 지도", f"표·그림 {len(tables) + len(figures)}", "전체 단어표"])
+    with tab_map:
         st.markdown(f'<div class="pp-panel" style="padding:6px 8px; overflow-x:auto"><table class="pp-table pp-overview">'
                     f'<thead><tr><th>절</th><th>문장</th><th>신호 문구로 찾은 핵심 문장</th><th>소제목</th></tr></thead>'
                     f'<tbody>{"".join(rows)}</tbody></table></div>', unsafe_allow_html=True)
-
-    tables = ss.get("paper_tables") or []
-    figures = ss.get("paper_figures") or []
-    with st.expander(f"논문의 표·그림 모아보기 · 표 {len(tables)}개 · 그림 {len(figures)}개"):
+    with tab_fl:
         st.caption("본문을 읽을 때는 표·그림을 처음 언급한 문장 바로 아래에 넣어 보여 줘요. 여기는 전체 목록이에요.")
         if not tables and not figures:
             st.caption("'Table 1:'·'Figure 1:'처럼 시작하는 설명(캡션)을 찾지 못했어요.")
         for t in tables + figures:
             table_card(t, "all")
-
-    with st.expander("논문 전체 어려운 단어표"):
+    with tab_gl:
         whole = analyze("\n\n".join(s.text for s in paper.sections))
         entries = G.build(whole)
         st.download_button("전체 단어표 내려받기(CSV)", G.to_csv(entries), file_name="paperpath_paper_glossary.csv",
@@ -1568,10 +1600,8 @@ def reading_page() -> None:
 
     t1, t2, t3 = st.columns([1.4, 2.2, 1], vertical_alignment="center")
     t1.markdown(sec_head("02", "원문과 번역 읽기"), unsafe_allow_html=True)
-    c = a.counts
-    chips = "".join(f'<span class="pp-chip {color}">{label} {c[k]}</span>' for k, label, color in CHIPS if c[k])
-    t2.markdown(f'<div class="pp-chips">{chips or "<span class=pp-meta>표시할 표현이 없어요</span>"}</div>',
-                unsafe_allow_html=True)            # 0개인 표시는 숨긴다. 칩 색은 원문 형광펜 색(범례)
+    with t2:
+        mark_chips(a)
     with t3:
         st.toggle("읽기 전용 단계 보기", key="show_steps")
     if ss.show_steps:

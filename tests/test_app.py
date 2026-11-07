@@ -41,7 +41,23 @@ def test_first_screen_shows_demo_skeleton_and_flag(at):
     text = md_text(at)
     assert "실제 논문 아님" in text
     assert "we introduce" in text and "신호 문구로 찾음" in text
-    assert "약어 1" in text and "참조 1" in text
+    chips = mark_chips(at).options
+    assert any("약어 1" in o for o in chips) and any("참조 1" in o for o in chips)
+
+
+def mark_chips(at):
+    return next(g for g in at.get("button_group") if g.key == "mark_pills")
+
+
+def test_chip_turns_highlight_off_and_on(at):
+    """02 칩을 누르면 그 형광펜만 꺼지고, 칩은 흐리게 남아 다시 켤 수 있다."""
+    assert 'class="pp-m hedge"' in md_text(at)
+    mark_chips(at).unselect("hedge").run()
+    assert not at.exception
+    assert "HEDGE" not in at.session_state["active_rules"] and 'class="pp-m hedge"' not in md_text(at)
+    assert any("추측·가능성 2" in o for o in mark_chips(at).options)    # 끈 칩도 개수와 함께 남는다
+    mark_chips(at).select("hedge").run()
+    assert "HEDGE" in at.session_state["active_rules"] and 'class="pp-m hedge"' in md_text(at)
 
 
 def test_translation_not_called_on_load(at, monkeypatch):
@@ -69,7 +85,7 @@ def test_rules_survive_hiding_steps_panel(at):
     at.checkbox(key="rule_REFERENCE").uncheck().run()
     at.toggle(key="show_steps").set_value(False).run()
     assert "REFERENCE" not in at.session_state["active_rules"]
-    assert 'pp-chip violet">참조' not in md_text(at)          # 0개가 된 표시는 칩을 숨긴다
+    assert "reference" not in mark_chips(at).value              # 끈 표시는 칩이 꺼진 상태로 남는다
 
 
 def test_translation_result_survives_rule_toggle(at):
@@ -326,8 +342,9 @@ def test_reopen_saved_pdf_document_without_file(blank):
     assert not blank.exception
     ss = blank.session_state
     assert ss["source"]["kind"] == "pdf" and ss["input_text"] == secs[0]["text"] and not ss["show_input"]
-    out = "\n".join(m.value for m in blank.markdown)
+    out = "\n".join(m.value for m in [*blank.markdown, *blank.caption])   # 논문 안내(notes)는 00 아래 caption
     assert "우리는 작은 재순위 모델을 제안한다." in out and "표·그림은 PDF를 다시 넣으면 보여요." in out
+    assert any(e.label.startswith("논문 전체 보기") for e in blank.expander)   # 펼침 칸 셋을 하나(탭)로 묶음
     blank.button(key="reinput_btn").click().run()
     blank.button(key=f"doc_del_{rec['id']}").click().run()
     assert rec["id"] not in blank.session_state["browser_docs"]
@@ -355,7 +372,7 @@ def test_missing_problem_card_explains_and_zero_chips_hidden(at):
     at.run()
     out = "\n".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style"))
     assert "첫 문장부터 바로 방법을 소개해요" in out and "지어낸 문장으로 채우지 않아요" in out
-    assert "추측·가능성 0" not in out
+    assert not any("추측·가능성" in o for o in mark_chips(at).options)   # 0개인 표시는 칩이 없다
 
 
 def test_reading_helper_in_sticky_bar(at):
