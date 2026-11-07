@@ -363,3 +363,24 @@ def test_page_break_sentence_tail_is_kept():
                                   "Literature Review: Understanding Competing Definitions"])
 def test_font_head_accepts_colon_and_initials(line):
     assert heading(line, 0, font="top") == ("top", line)
+
+
+def test_bold_cells_side_by_side_are_table_header_not_subheads():
+    """같은 높이에 굵은 칸 두 개가 나란히 있으면 표 머리글(Bradley 관찰표): 소제목이 되지 않는다."""
+    say = ["We watched one child play with a puzzle at home today.",
+           "The child talked about the pieces and their colors often."]
+    items = []
+    y = 740
+    for head in ("Introduction", "Methods", "Setting for Child One"):
+        items.append((60, y, head, "B", 10))
+        items += [(60, y - 16 - 13 * k, t, "R", 10) for k, t in enumerate(say)]
+        y -= 60
+    items += [(60, y, "Child Activity", "B", 10), (330, y, "Others Involved", "B", 10)]
+    items += [(60, y - 16, "puzzle on the floor.", "R", 10), (330, y - 16, "mother at the table.", "R", 10)]
+    items.append((60, y - 60, "Results", "B", 10))
+    items += [(60, y - 76 - 13 * k, t, "R", 10) for k, t in enumerate(say)]
+    pdf = extract(make_font_pdf([items]))
+    paper = split_paper(pdf.lines, pdf.title)
+    methods = next(s for s in paper.sections if s.title == "Methods")
+    assert methods.subheads == ["Setting for Child One"]
+    assert "Child Activity" in methods.text                            # 머리글 글자는 표 내용으로 남는다

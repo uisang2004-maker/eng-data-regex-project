@@ -115,6 +115,10 @@ def _page_lines(page) -> tuple[list[tuple[float, float, str, float]], bool]:
         left, right = parts
         if left and right:
             split_rows += 1
+            l_line, r_line = _line(left), _line(right)
+            block_l.append(l_line + (r_line[4],))      # 같은 높이 반대쪽 칸의 글꼴(표 머리글 판단용)
+            block_r.append(r_line + (l_line[4],))
+            continue
         if left:
             block_l.append(_line(left))
         if right:
@@ -146,10 +150,14 @@ def _body_font(pages) -> str:
 
 def _head_mark(row, body: float, body_font: str) -> str:
     """줄 전체가 본문과 다른 굵은 글꼴(굵은 기울임 포함)이고 짧으면 제목 후보 표시.
-    기울이기만 한 글꼴(책 제목 등)은 굵지 않아서 후보가 되지 않는다."""
+    기울이기만 한 글꼴(책 제목 등)은 굵지 않아서 후보가 되지 않는다.
+    같은 높이 반대쪽 칸도 굵은 글꼴이면 표 머리글('Child's Activity | Others Involved')로 보고 표시하지 않는다.
+    2단 논문의 제목은 같은 높이 반대쪽 단이 보통 본문 글꼴이라 걸리지 않는다."""
     font = row[4]
+    partner = row[5] if len(row) > 5 else ""
     if (not font or font == body_font or not BOLD_FONT.search(font)
-            or len(row[2].split()) > 12 or row[1] < body - 0.2):
+            or len(row[2].split()) > 12 or row[1] < body - 0.2
+            or (partner and partner != body_font and BOLD_FONT.search(partner))):
         return ""
     return HEAD_MARK if row[1] >= body + HEAD_GAP else SUB_MARK
 

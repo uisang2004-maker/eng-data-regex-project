@@ -195,7 +195,7 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
             if kind == "end":
                 break
             if kind == "sub":
-                if cur is not None:
+                if cur is not None and name not in cur.subheads:     # 같은 소제목은 한 번만
                     cur.subheads.append(name)
                 continue
             m = P.SEC_NUM_HEAD.match(P.SMALL_CAPS_HEAD.sub(r"\1", line))

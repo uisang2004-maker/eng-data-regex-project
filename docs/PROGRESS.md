@@ -594,3 +594,14 @@
    - 기존 시험 PDF 7편과 Elden: 절·소제목·추출 텍스트가 **변경 전과 같음**. 문장 끝 조각 규칙을 처음에 넓게 잡았을 때 7편에서 2곳이 바뀌어(수식 문장 1곳 복원, 수식 조각 `and W ∈ .` 1곳 추가) 소문자 낱말만 받도록 좁힘
    - `py -I -m pytest` **223 passed**
    - 한계: Bradley의 관찰 표 머리글(`Child's Activity` 등)이 소제목 목록에 두 번씩 들어감. 굵은 글꼴 없이 크기만 다른 제목은 아직 실제 예가 없어 구현하지 않음
+
+### 2026-11-07 (41) — 표 머리글이 소제목으로 들어가는 문제
+
+1. 문제: Bradley(2021)의 관찰표 맨 윗줄("Child's Activity" | "Others Involved and Relevant Events")이 Methods 소제목에 두 번씩 들어감. 한 줄에 칸 두 개가 나란히 있는 것을 2단 편집의 단 빈틈으로 보고 둘로 가른 뒤, 두 칸 다 굵은 글꼴이라 각각 소제목 후보가 됨
+2. 구현
+   - `src/pdf_text.py`: 가운데 빈틈으로 가른 줄은 같은 높이 반대쪽 칸의 글꼴을 함께 기록하고, **양쪽이 모두 굵은 글꼴이면 표 머리글로 보고 제목 후보 표시를 붙이지 않음**(2단 논문의 제목은 같은 높이 반대쪽 단이 보통 본문 글꼴이라 걸리지 않음)
+   - `src/sections.py`: 한 절 안에서 같은 소제목은 한 번만 남김(안전장치)
+3. 실행 결과
+   - Bradley Methods 소제목 8개 → **4개**(Setting for Child One · Observation of Child One · Setting for Child Two · Observation of Child Two). 머리글 글자는 관찰표 내용으로 본문에 남음(+89자)
+   - 나머지 9편(기존 7편·Elden·Newman): 절·소제목·추출 텍스트가 변경 전과 같음(스냅샷 비교, 바뀐 곳은 Bradley Methods 2줄뿐)
+   - `py -I -m pytest` **224 passed**. 새 테스트는 표 머리글 규칙을 끄면 실패하는 것을 확인함
