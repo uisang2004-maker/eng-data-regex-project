@@ -6,6 +6,8 @@
 3. References가 나오면 멈춘다(참고문헌·부록은 분석하지 않음).
 4. 각주·그림/표 설명·이메일 줄(PDF_NOISE_PARA)과 낱말이 거의 없는 조각(표·수식)은 뺀다.
 5. 단·쪽이 바뀌며 끊긴 문단은 앞 문단이 문장부호로 끝나지 않으면 다시 잇는다. 그다음 clean()으로 정리한다.
+6. 번호 붙은 절을 하나도 못 찾았을 때만(백과사전·인문학 글) 굵은 글꼴 줄 표시(pdf_text.HEAD_MARK/SUB_MARK)를
+   단서로 SEC_FONT_HEAD 정규식에 맞는 줄을 절 제목으로 받는다. 번호 절이 있는 논문의 결과는 바뀌지 않는다.
 """
 
 import re
@@ -13,7 +15,7 @@ from dataclasses import dataclass, field
 
 from src import patterns as P
 from src.clean import clean
-from src.pdf_text import SMALL_MARK
+from src.pdf_text import HEAD_MARK, MARKS, SMALL_MARK, SUB_MARK
 
 ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10, "XI": 11, "XII": 12}
 MAX_TITLE_WORDS = 10
@@ -72,8 +74,8 @@ def nice_title(title: str, keep: frozenset[str] = frozenset()) -> str:
     return " ".join(out)
 
 
-def heading(line: str, last_top: int, keep: frozenset[str] = frozenset()) -> tuple[str, str] | None:
-    """제목 줄이면 ("top"|"sub"|"end", 화면 이름), 아니면 None."""
+def heading(line: str, last_top: int, keep: frozenset[str] = frozenset(), font: str = "") -> tuple[str, str] | None:
+    """제목 줄이면 ("top"|"sub"|"end", 화면 이름), 아니면 None. font는 굵은 글꼴 단서("top"|"sub"|"")."""
     s = P.SMALL_CAPS_HEAD.sub(r"\1", line.strip())
     if P.SEC_END.match(s):
         return "end", s
@@ -82,6 +84,9 @@ def heading(line: str, last_top: int, keep: frozenset[str] = frozenset()) -> tup
         return "top", nice_title(m.group("title").strip(), keep)
     m = P.SEC_NUM_HEAD.match(s)
     if not m:
+        m = P.SEC_FONT_HEAD.match(s) if font else None
+        if m and len(s.split()) <= MAX_TITLE_WORDS and len(s) >= 4:
+            return font, s
         return None
     title = m.group("title").strip()
     words = title.split()
@@ -125,12 +130,24 @@ def _join(paras: list[list[str]]) -> str:
 
 
 def split_paper(lines: list[str], title: str = "") -> Paper:
+    paper = _split(lines, title, use_font=False)
+    if any(s.title[:1].isdigit() for s in paper.sections) or not any(ln[:1] in (HEAD_MARK, SUB_MARK) for ln in lines):
+        return paper                             # 번호 절이 있으면 글꼴 단서는 쓰지 않는다
+    by_font = _split(lines, title, use_font=True)
+    return by_font if len(by_font.sections) > len(paper.sections) else paper
+
+
+def _split(lines: list[str], title: str, use_font: bool) -> Paper:
     sections: list[Section] = []
     cur: Section | None = None
     para: list[str] = []
     last_top = 0
     notes: list[str] = []
-    keep = caps_words([ln.lstrip(SMALL_MARK) for ln in lines])
+    keep = caps_words([ln.lstrip(MARKS) for ln in lines])
+    # 굵은 글꼴 단서: 본문보다 큰 굵은 줄이 있으면 그게 절, 본문 크기 굵은 줄은 소제목. 큰 줄이 없으면 본문 크기 줄이 절
+    has_head = any(ln.startswith(HEAD_MARK) for ln in lines)
+    font_of = {HEAD_MARK: "top", SUB_MARK: "sub" if has_head else "top"} if use_font else {}
+    title_key = re.sub(r"\s+", " ", title).strip().lower()
 
     def end_para():
         nonlocal para
@@ -140,10 +157,13 @@ def split_paper(lines: list[str], title: str = "") -> Paper:
 
     for raw in lines:
         small = raw.startswith(SMALL_MARK)
-        line = P.PDF_CID.sub("", raw.lstrip(SMALL_MARK)).strip()
+        font = font_of.get(raw[:1], "")
+        line = P.PDF_CID.sub("", raw.lstrip(MARKS)).strip()
         if not line:
             end_para()
             continue
+        if font and line.lower() == title_key:
+            font = ""                            # 첫 쪽의 글 제목 줄은 절이 아니다
         m = P.SEC_INLINE_ABSTRACT.match(line)
         if m and not sections:                   # 'Abstract—본문'처럼 같은 줄에서 시작하는 초록
             end_para()
@@ -151,14 +171,15 @@ def split_paper(lines: list[str], title: str = "") -> Paper:
             sections.append(cur)
             para.append(m.group("rest"))
             continue
-        h = None if small else heading(line, last_top, keep)     # 작은 글자 줄(번호 각주 등)은 제목이 될 수 없다
+        h = None if small else heading(line, last_top, keep, font)  # 작은 글자 줄(번호 각주 등)은 제목이 될 수 없다
         if h:
             kind, name = h
             end_para()
             if kind == "end":
                 break
             if kind == "sub":
-                cur.subheads.append(name)
+                if cur is not None:
+                    cur.subheads.append(name)
                 continue
             m = P.SEC_NUM_HEAD.match(P.SMALL_CAPS_HEAD.sub(r"\1", line))
             if m:
@@ -174,7 +195,7 @@ def split_paper(lines: list[str], title: str = "") -> Paper:
         cur = Section("본문")
         para = []
         for raw in lines:
-            line = P.PDF_CID.sub("", raw.lstrip(SMALL_MARK)).strip()
+            line = P.PDF_CID.sub("", raw.lstrip(MARKS)).strip()
             if line:
                 para.append((SMALL_MARK if raw.startswith(SMALL_MARK) else "") + line)
             elif para:

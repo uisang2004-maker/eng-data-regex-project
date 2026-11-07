@@ -564,3 +564,17 @@
    - pandas를 부르는 브라우저 저장 컴포넌트만 가짜로 바꾼 임시 실행(스크래치 파일, 커밋 안 함): **210 passed, 1 failed**. 남은 1개는 검증 결과 쪽의 `st.write(dict)`가 pandas를 불러서 나는 것으로 이번 변경과 무관
    - 새 테스트: 칩으로 추측 형광펜 끄고 켜기, 끈 칩이 개수와 함께 남는지, 0개 칩 없음, PDF 다시 열기에서 "논문 전체 보기" 한 칸
    - 로컬 서버도 같은 이유로 열리지 않아 화면 확인은 못 함(공개 사이트 배포 뒤 확인 필요)
+
+### 2026-11-07 (39) — 번호 없는 절 제목(굵은 글꼴) 찾기
+
+1. 문제: 이의상 님이 넣어 본 `Elden2009-Space.pdf`(지리학 백과사전 항목, Elsevier 2009, 6쪽)가 "Introduction"과 "Conclusion" 두 절로만 나뉘고 가운데 약 25,900자가 Introduction 하나에 몰림. 제목도 쪽마다 찍힌 출판사 표시 "Author's personal copy"로 잡힘
+2. 원인: 절 제목을 번호(`3 Method`)나 정해진 이름 목록(Abstract·Introduction·Conclusion…)으로만 찾는데, 이 글의 절 제목은 번호 없이 자유롭게 지어짐(Space in the Philosophical Tradition 등). PDF 글꼴을 열어 보니 절 제목은 모두 `Advhel_hev` 11pt, 소제목은 `AdvHelv_B` 10pt, 본문은 `AdvJanMT` 10pt로 분명히 구분됨
+3. 구현
+   - `src/pdf_text.py`: 낱말의 글자(chars)에서 글꼴을 읽어(낱말 나누기는 그대로) 줄 전체가 본문과 다른 굵은 글꼴이면 제목 후보 표시를 붙임(본문보다 크면 `HEAD_MARK`, 같으면 `SUB_MARK`). 기울인 글꼴(책 제목 등)은 제외. 첫 쪽 제목은 여러 쪽에 똑같이 찍힌 줄(워터마크·머리글)을 빼고 고름
+   - `src/patterns.py`: `SEC_FONT_HEAD`(낱말마다 대문자로 시작, 관사·전치사 허용, 문장부호로 끝나지 않음). `SEC_END`에 `Further Reading`·`Works Cited` 추가
+   - `src/sections.py`: **번호 붙은 절을 하나도 못 찾았을 때만** 글꼴 단서 + `SEC_FONT_HEAD`로 다시 나눔. 글꼴은 후보를 고르는 단서이고, 제목으로 받을지는 정규식이 정함
+4. 실행 결과
+   - Elden: 2절 → **5절**(Introduction · Space in the Philosophical Tradition · Spatial Science · Ways of Thinking Space · Conclusion) + 소제목 5개, 제목 "Space I", Further Reading·See also는 본문에서 빠짐, 초록이 없어 쪽은 본문·결론 2개
+   - 기존 시험 PDF 7편: 절 제목·절 글자 수·소제목·추출 텍스트가 **변경 전과 완전히 같음**(스냅샷 비교). 처음 구현(낱말 추출에 fontname 속성 추가)에서는 글꼴이 바뀌는 수식에서 낱말이 갈라져(`n×n` → `n × n`) 4편이 1~3자 달라졌고, 글자 단위로 글꼴을 읽도록 바꿔 해결
+   - `py -I -m pytest` **219 passed**(굵은 제목 PDF를 코드로 만들어 절·소제목·워터마크·참고문헌 확인, 번호 절이 있으면 글꼴 단서 무시, 제목 정규식 6가지)
+   - 한계: 굵은 글꼴 없이 크기만 다른 제목, 제목이 본문과 같은 글꼴인 PDF는 여전히 못 나눔. 시험 PDF는 `data/raw/`에만 두고 커밋하지 않음

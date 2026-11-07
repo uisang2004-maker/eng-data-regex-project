@@ -442,8 +442,16 @@ SEC_NAMED_HEAD = re.compile(
 )
 """번호 없이 이름만 있는 절 제목 줄(대문자로만 쓴 ``ABSTRACT``도 허용)."""
 
-SEC_END = re.compile(r"^(?:References|Bibliography)$", re.I)
-"""여기부터는 참고문헌이라 분석하지 않는다(부록도 함께 뺀다)."""
+SEC_END = re.compile(r"^(?:References|Bibliography|Further\s+Reading|Works\s+Cited)$", re.I)
+"""여기부터는 참고문헌이라 분석하지 않는다(부록도 함께 뺀다). 백과사전·인문학 글은 Further Reading·Works Cited."""
+
+SEC_FONT_HEAD = re.compile(
+    r"^(?P<title>[A-Z][\w'’-]*(?:,?\s+(?:[A-Z][\w'’-]*|a|an|the|of|and|or|for|to|in|on|with|by|at|via|from|"
+    r"versus|vs\.|as|into|between|beyond))*)$"
+)
+"""번호 없는 절 제목(굵은 글꼴 줄일 때만 대 본다): 낱말마다 대문자로 시작하고(관사·전치사 제외) 문장부호로 끝나지 않는다.
+``Space in the Philosophical Tradition``, ``Absolute, Relative, and Relational Space``. 'Author's personal copy'처럼
+소문자 낱말이 섞인 줄은 받지 않는다."""
 
 PDF_NOISE_PARA = re.compile(
     r"^(?:[∗*†‡§¶]|\(cid:\d+\)|\d{1,2}\s+(?:https?://|www\.|[A-Z])|"    # 각주(기호, 번호+주소, 번호+문장)

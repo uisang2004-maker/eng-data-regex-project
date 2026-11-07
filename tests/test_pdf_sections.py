@@ -268,3 +268,72 @@ def test_find_figure_above_caption():
     f = figs[0]
     assert f.kind == "figure" and not f.whole_page and f.mime == "image/jpeg" and f.png[:2] == b"\xff\xd8"
     assert f.caption.startswith("Figure 1: The model") and f.width > 0 and f.height > 0
+
+
+def make_font_pdf(pages: list[list[tuple]]) -> bytes:
+    """(x, y, 글자, 글꼴, 크기) 목록: 글꼴 'R'=본문(Times-Roman), 'B'=굵은 제목(Helvetica-Bold)."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", None,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
+    kids = []
+    for items in pages:
+        body = "".join(f"BT /F{1 if f == 'R' else 2} {s} Tf {x} {y} Td ({t}) Tj ET\n" for x, y, t, f, s in items)
+        objs.append(f"<< /Length {len(body)} >>\nstream\n{body}endstream")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {len(objs)} 0 R "
+                    f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>")
+        kids.append(len(objs))
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] /Count {len(kids)} >>"
+    out, offs = "%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out.encode("latin-1")))
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    xref = len(out.encode("latin-1"))
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n" + "".join(f"{o:010d} 00000 n \n" for o in offs)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    return out.encode("latin-1")
+
+
+def encyclopedia_pages() -> list[list[tuple]]:
+    """번호 없는 굵은 절 제목(11pt)·소제목(10pt), 쪽마다 찍힌 워터마크(20pt)가 있는 백과사전식 글."""
+    body = ["Space is the key topic of geography and it is used in many ways.",
+            "It has a long history in philosophy and in the sciences of nature.",
+            "Writers have used it as a container for things and as a relation."]
+    def block(y, head, kind):
+        items = [(60, y, head, "B", 11 if kind == "top" else 10)]
+        items += [(60, y - 20 - 13 * k, t, "R", 10) for k, t in enumerate(body)]
+        return items
+    p1 = [(150, 770, "Author's personal copy", "B", 20), (60, 730, "Space I", "B", 14)]
+    p1 += block(690, "Introduction", "top") + block(620, "Space in the Philosophical Tradition", "top")
+    p1 += block(550, "Space and Time", "sub")
+    p2 = [(150, 770, "Author's personal copy", "B", 20)]
+    p2 += block(690, "Ways of Thinking Space", "top") + block(620, "Conclusion", "top")
+    p2 += [(60, 550, "Further Reading", "B", 11), (60, 530, "Harvey D (1969) Explanation in Geography.", "R", 10)]
+    return [p1, p2]
+
+
+def test_unnumbered_bold_headings_split_sections():
+    pdf = extract(make_font_pdf(encyclopedia_pages()))
+    assert pdf.title == "Space I"                                     # 쪽마다 찍힌 워터마크는 제목이 아니다
+    paper = split_paper(pdf.lines, pdf.title)
+    assert [s.title for s in paper.sections] == ["Introduction", "Space in the Philosophical Tradition",
+                                                 "Ways of Thinking Space", "Conclusion"]
+    assert paper.sections[1].subheads == ["Space and Time"]           # 본문 크기 굵은 줄은 소제목
+    assert "Harvey" not in " ".join(s.text for s in paper.sections)   # Further Reading부터는 참고문헌
+
+
+def test_bold_marks_ignored_when_numbered_sections_exist():
+    from src.pdf_text import HEAD_MARK
+    say = "We study a small method for reading papers in this section."
+    lines = ["Abstract", "", say, "", "1 Introduction", "", say, "",
+             HEAD_MARK + "Main Results", "", say, "", "2 Method", "", say]
+    paper = split_paper(lines, "T")
+    assert [s.title for s in paper.sections] == ["Abstract", "1 Introduction", "2 Method"]
+
+
+@pytest.mark.parametrize("line,ok", [
+    ("Space in the Philosophical Tradition", True), ("Absolute, Relative, and Relational Space", True),
+    ("Smooth versus Striated", True), ("Author's personal copy", False), ("We propose a method.", False),
+    ("Results show gains", False)])
+def test_font_head_regex(line, ok):
+    assert bool(heading(line, 0, font="top")) == ok
+    assert heading(line, 0) is None or line == "Introduction"         # 글꼴 단서가 없으면 받지 않는다
