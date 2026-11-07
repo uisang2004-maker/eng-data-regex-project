@@ -337,3 +337,29 @@ def test_bold_marks_ignored_when_numbered_sections_exist():
 def test_font_head_regex(line, ok):
     assert bool(heading(line, 0, font="top")) == ok
     assert heading(line, 0) is None or line == "Introduction"         # 글꼴 단서가 없으면 받지 않는다
+
+
+def test_same_size_bold_heads_use_common_section_names():
+    """굵은 제목이 모두 같은 크기(Bradley 2021형): 흔한 절 이름은 절, 나머지는 소제목. 첫 절 앞 굵은 줄(부제)은 버린다."""
+    from src.pdf_text import SUB_MARK as S
+    say = "We watched one child play with a puzzle for twenty minutes at home."
+    lines = [S + "Watching Children at Home", "", S + "Abstract:", say, "", S + "Introduction", "", say, "",
+             S + "Methods", "", S + "Setting for Child One", "", say, "", S + "Observation of Child One", "", say, "",
+             S + "Results", "", say, "", S + "Discussion: What the Puzzle Shows", "", say]
+    paper = split_paper(lines, "Naturalistic Child Observation")
+    assert [s.title for s in paper.sections] == ["Abstract", "Introduction", "Methods", "Results",
+                                                 "Discussion: What the Puzzle Shows"]
+    assert paper.sections[2].subheads == ["Setting for Child One", "Observation of Child One"]
+
+
+def test_page_break_sentence_tail_is_kept():
+    say = "Complete value neutrality is impossible yet remains an ideal that allows all perspectives"
+    lines = ["Abstract", "", say, "", "\x1f4", "", "to be heard.", "", "1 Introduction", "", say + "."]
+    paper = split_paper(lines, "T")
+    assert paper.sections[0].text.endswith("allows all perspectives to be heard.")
+
+
+@pytest.mark.parametrize("line", ["Analysis: A Contemporary Focus on Ibram X. Kendi",
+                                  "Literature Review: Understanding Competing Definitions"])
+def test_font_head_accepts_colon_and_initials(line):
+    assert heading(line, 0, font="top") == ("top", line)

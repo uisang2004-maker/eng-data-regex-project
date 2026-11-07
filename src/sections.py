@@ -20,6 +20,7 @@ from src.pdf_text import HEAD_MARK, MARKS, SMALL_MARK, SUB_MARK
 ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10, "XI": 11, "XII": 12}
 MAX_TITLE_WORDS = 10
 SENT_END = re.compile(r"[.!?:][\"'”’)\]]*$")
+CONT_FRAGMENT = re.compile(r"[a-z][a-z ,;'’-]*[.!?][\"”’)]*")   # 소문자 낱말로만 된 문장 끝 조각(수식 조각은 아님)
 
 
 @dataclass
@@ -115,6 +116,16 @@ def _is_noise(para: list[str], keep_small: bool = False) -> bool:
     return bool(tokens) and words / len(tokens) < 0.4      # 숫자·기호가 대부분인 표·수식
 
 
+def _continues(kept: list[list[str]], para: list[str]) -> bool:
+    """쪽이 바뀌며 떨어져 나온 문장 끝 조각(``to be heard.``): 앞 문단이 문장부호 없이 끝났고, 이 조각은 소문자로
+    시작해 문장부호로 끝나는 짧은 본문 글자 한 줄이면 짧아도 버리지 않는다."""
+    if not kept or len(para) != 1 or para[0].startswith(SMALL_MARK):
+        return False
+    text = para[0].strip()
+    return (len(text) <= 80 and bool(CONT_FRAGMENT.fullmatch(text))
+            and not SENT_END.search(kept[-1][-1].lstrip(SMALL_MARK).rstrip()))
+
+
 def _join(paras: list[list[str]]) -> str:
     """끊긴 문단 다시 잇기: 앞 문단이 문장부호로 끝나지 않으면 한 줄 개행으로 붙인다(하이픈 복원이 동작하도록)."""
     out = ""
@@ -144,9 +155,12 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
     last_top = 0
     notes: list[str] = []
     keep = caps_words([ln.lstrip(MARKS) for ln in lines])
-    # 굵은 글꼴 단서: 본문보다 큰 굵은 줄이 있으면 그게 절, 본문 크기 굵은 줄은 소제목. 큰 줄이 없으면 본문 크기 줄이 절
+    # 굵은 글꼴 단서: 본문보다 큰 굵은 줄이 있으면 그게 절, 본문 크기 굵은 줄은 소제목.
+    # 굵은 줄이 모두 같은 크기면 흔한 절 이름(SEC_STD_TOP)으로 시작하는 줄이 절, 나머지는 소제목("std")
     has_head = any(ln.startswith(HEAD_MARK) for ln in lines)
-    font_of = {HEAD_MARK: "top", SUB_MARK: "sub" if has_head else "top"} if use_font else {}
+    font_of = {HEAD_MARK: "top", SUB_MARK: "sub" if has_head else "std"} if use_font else {}
+    std_heads = sum(bool(P.SEC_STD_TOP.match(ln.lstrip(MARKS).strip())) for ln in lines
+                    if ln[:1] in (HEAD_MARK, SUB_MARK))
     title_key = re.sub(r"\s+", " ", title).strip().lower()
 
     def end_para():
@@ -164,6 +178,9 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
             continue
         if font and line.lower() == title_key:
             font = ""                            # 첫 쪽의 글 제목 줄은 절이 아니다
+        if font == "std":
+            std = bool(P.SEC_STD_TOP.match(line))
+            font = "top" if std or std_heads < 2 else ("sub" if sections else "")   # 첫 절 앞(제목·부제)은 버린다
         m = P.SEC_INLINE_ABSTRACT.match(line)
         if m and not sections:                   # 'Abstract—본문'처럼 같은 줄에서 시작하는 초록
             end_para()
@@ -209,7 +226,10 @@ def _split(lines: list[str], title: str, use_font: bool) -> Paper:
     for s in sections:
         # 초록을 통째로 작은 글자로 쓰는 형식(IEEE)만 작은 글자를 남긴다. 섞여 있으면 작은 쪽은 각주로 본다
         all_small = all(sum(ln.startswith(SMALL_MARK) for ln in p) * 2 > len(p) for p in s.paras)
-        kept = [p for p in s.paras if not _is_noise(p, keep_small=s.title == "Abstract" and all_small)]
+        kept: list[list[str]] = []
+        for p in s.paras:
+            if not _is_noise(p, keep_small=s.title == "Abstract" and all_small) or _continues(kept, p):
+                kept.append(p)
         s.dropped = len(s.paras) - len(kept)
         s.text = clean(P.EMAIL.sub("", _join(kept))).text     # 긴 문단 속 이메일도 지운다
         s.paras = []

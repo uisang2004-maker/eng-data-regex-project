@@ -437,7 +437,7 @@ SEC_NUM_HEAD = re.compile(
 
 SEC_NAMED_HEAD = re.compile(
     r"^(?P<title>Abstract|Introduction|Related\s+Work|Background|Conclusions?|Discussion|Limitations|"
-    r"Acknowledg(?:e)?ments?|References|Bibliography)\.?$",
+    r"Acknowledg(?:e)?ments?|References|Bibliography)[.:]?$",
     re.I,
 )
 """번호 없이 이름만 있는 절 제목 줄(대문자로만 쓴 ``ABSTRACT``도 허용)."""
@@ -446,12 +446,21 @@ SEC_END = re.compile(r"^(?:References|Bibliography|Further\s+Reading|Works\s+Cit
 """여기부터는 참고문헌이라 분석하지 않는다(부록도 함께 뺀다). 백과사전·인문학 글은 Further Reading·Works Cited."""
 
 SEC_FONT_HEAD = re.compile(
-    r"^(?P<title>[A-Z][\w'’-]*(?:,?\s+(?:[A-Z][\w'’-]*|a|an|the|of|and|or|for|to|in|on|with|by|at|via|from|"
-    r"versus|vs\.|as|into|between|beyond))*)$"
+    r"^(?P<title>[A-Z][\w'’-]*(?:(?:,?\s+|:\s+)(?:[A-Z]\.|[A-Z][\w'’-]*|a|an|the|of|and|or|for|to|in|on|with|"
+    r"by|at|via|from|versus|vs\.|as|into|between|beyond))*)$"
 )
 """번호 없는 절 제목(굵은 글꼴 줄일 때만 대 본다): 낱말마다 대문자로 시작하고(관사·전치사 제외) 문장부호로 끝나지 않는다.
 ``Space in the Philosophical Tradition``, ``Absolute, Relative, and Relational Space``. 'Author's personal copy'처럼
-소문자 낱말이 섞인 줄은 받지 않는다."""
+소문자 낱말이 섞인 줄은 받지 않는다. 콜론으로 이은 제목(``Analysis: A Contemporary Focus on Ibram X. Kendi``)도 받는다."""
+
+SEC_STD_TOP = re.compile(
+    r"^(?:Abstract|Introduction|Background|Literature\s+Review|Related\s+Work|Methods?|Methodology|"
+    r"Materials\s+and\s+Methods|Data(?:\s+and\s+Methods)?|Results|Findings|Analysis|Discussion|"
+    r"Conclusions?|Limitations)(?=:|$)",
+    re.I,
+)
+"""논문에서 흔한 절 이름(뒤에 콜론으로 부제가 붙어도 됨). 굵은 제목이 모두 같은 크기라 단계를 알 수 없을 때
+이 이름으로 시작하는 제목은 절, 나머지(``Setting for Child One``)는 그 절의 소제목으로 본다."""
 
 PDF_NOISE_PARA = re.compile(
     r"^(?:[∗*†‡§¶]|\(cid:\d+\)|\d{1,2}\s+(?:https?://|www\.|[A-Z])|"    # 각주(기호, 번호+주소, 번호+문장)

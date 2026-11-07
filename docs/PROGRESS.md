@@ -578,3 +578,19 @@
    - 기존 시험 PDF 7편: 절 제목·절 글자 수·소제목·추출 텍스트가 **변경 전과 완전히 같음**(스냅샷 비교). 처음 구현(낱말 추출에 fontname 속성 추가)에서는 글꼴이 바뀌는 수식에서 낱말이 갈라져(`n×n` → `n × n`) 4편이 1~3자 달라졌고, 글자 단위로 글꼴을 읽도록 바꿔 해결
    - `py -I -m pytest` **219 passed**(굵은 제목 PDF를 코드로 만들어 절·소제목·워터마크·참고문헌 확인, 번호 절이 있으면 글꼴 단서 무시, 제목 정규식 6가지)
    - 한계: 굵은 글꼴 없이 크기만 다른 제목, 제목이 본문과 같은 글꼴인 PDF는 여전히 못 나눔. 시험 PDF는 `data/raw/`에만 두고 커밋하지 않음
+
+### 2026-11-07 (40) — 같은 크기 굵은 제목·굵은 기울임 제목·콜론 제목
+
+1. 이의상 님이 "크기만 다른 제목" 예로 구해 준 인문·사회과학 PDF 2편(Gettysburg Social Sciences Review, 오픈 액세스, `data/raw/`에만 둠)을 글꼴로 실측해 보니 둘 다 크기만 다른 제목이 아니었음
+   - Newman(2024) 22쪽: 절 제목이 **본문과 같은 12pt 굵은 기울임**(`TimesNewRomanPS-BoldItalicMT`). 기울임 글꼴을 빼는 규칙 때문에 놓쳤고, 콜론 제목(`Analysis: A Contemporary Focus on Ibram X. Kendi`)과 머리글자 `X.`도 정규식에 안 맞음 → 3절(제목·Introduction·Conclusion)로만 나뉨
+   - Bradley(2021) 24쪽: 제목을 찾긴 했지만 절·소제목이 모두 같은 `Arial-BoldMT` 11pt라 15개가 전부 절이 됨. `Methods`는 바로 소제목이 와서 빈 절로 사라짐
+2. 구현
+   - `src/pdf_text.py`: 굵은 기울임도 제목 후보(기울이기만 한 글꼴은 굵지 않아 여전히 제외)
+   - `src/patterns.py`: `SEC_FONT_HEAD`가 콜론으로 이은 제목·머리글자(`X.`)를 받음, `SEC_NAMED_HEAD`가 `Abstract:`처럼 콜론으로 끝나는 줄도 받음, 새 `SEC_STD_TOP`(Introduction·Literature Review·Methods·Results·Findings·Analysis·Discussion·Conclusion 등 흔한 절 이름, 뒤에 콜론 부제 허용)
+   - `src/sections.py`: 굵은 제목이 모두 같은 크기면 `SEC_STD_TOP`으로 시작하는 줄은 절, 나머지는 그 절의 소제목. 첫 절 앞 굵은 줄(제목·부제)은 버림. 쪽이 바뀌며 떨어진 소문자 문장 끝 조각(`to be heard.`)은 앞 문단이 문장부호 없이 끝났으면 버리지 않음(수식 조각은 받지 않도록 소문자 낱말만)
+3. 실행 결과
+   - Newman: 3절 → **6절**(Abstract · Introduction · Literature Review: … · Analysis: … · Discussion: … · Conclusion), 초록이 "…allows all perspectives **to be heard.**"까지 이어짐(전에는 쪽 경계에서 잘림)
+   - Bradley: 15절 → **6절**(Abstract · Introduction · Methods · Results · Discussion · Conclusion), Methods 아래 소제목 8개(Setting for Child One 등), Results 아래 2개
+   - 기존 시험 PDF 7편과 Elden: 절·소제목·추출 텍스트가 **변경 전과 같음**. 문장 끝 조각 규칙을 처음에 넓게 잡았을 때 7편에서 2곳이 바뀌어(수식 문장 1곳 복원, 수식 조각 `and W ∈ .` 1곳 추가) 소문자 낱말만 받도록 좁힘
+   - `py -I -m pytest` **223 passed**
+   - 한계: Bradley의 관찰 표 머리글(`Child's Activity` 등)이 소제목 목록에 두 번씩 들어감. 굵은 글꼴 없이 크기만 다른 제목은 아직 실제 예가 없어 구현하지 않음

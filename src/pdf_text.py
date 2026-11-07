@@ -26,7 +26,6 @@ SUB_MARK = "\x1d"         # 본문 크기의 굵은 글꼴 줄(소제목 후보)
 MARKS = SMALL_MARK + HEAD_MARK + SUB_MARK
 HEAD_GAP = 0.5            # 본문보다 이만큼(pt) 이상 크면 절 제목 후보, 아니면 소제목 후보
 BOLD_FONT = re.compile(r"bold|black|heavy|semibold|demi|medi(?:um)?\b|[-_,](?:b|bd|bx|hev)\b|cmbx", re.I)
-ITALIC_FONT = re.compile(r"ital|obli|[-_](?:i|it|bi|lightit)\b", re.I)
 
 
 @dataclass
@@ -146,9 +145,10 @@ def _body_font(pages) -> str:
 
 
 def _head_mark(row, body: float, body_font: str) -> str:
-    """줄 전체가 본문과 다른 굵은(기울지 않은) 글꼴이고 짧으면 제목 후보 표시."""
+    """줄 전체가 본문과 다른 굵은 글꼴(굵은 기울임 포함)이고 짧으면 제목 후보 표시.
+    기울이기만 한 글꼴(책 제목 등)은 굵지 않아서 후보가 되지 않는다."""
     font = row[4]
-    if (not font or font == body_font or not BOLD_FONT.search(font) or ITALIC_FONT.search(font)
+    if (not font or font == body_font or not BOLD_FONT.search(font)
             or len(row[2].split()) > 12 or row[1] < body - 0.2):
         return ""
     return HEAD_MARK if row[1] >= body + HEAD_GAP else SUB_MARK
