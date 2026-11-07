@@ -113,6 +113,8 @@ def find_acronyms(text: str) -> dict[str, str | None]:
             found.setdefault(key, None)
     for m in P.BARE_ACRONYM.finditer(text):
         key = _strip_plural(m.group(0))
+        if key in P.PROTO_MARK_WORDS:            # 'CAUTION'·'CRITICAL STEP'은 약어가 아니라 프로토콜 표시
+            continue
         upper = sum(ch.isupper() for ch in key)
         if upper >= 2 and upper / len(key) >= P.BARE_MIN_UPPER_RATIO:
             found.setdefault(key, None)
@@ -190,6 +192,10 @@ def _marks(text: str, acronyms: dict[str, str | None], active: frozenset) -> lis
                 continue
             marks.append(Mark(m.start(), m.end(), "hedge", "HEDGE", f"추측·가능성 · {P.HEDGE_RULE.reason}"))
 
+    # 시약 품번 괄호 '(Sigma-Aldrich, cat. no. B3883)' 안에는 표시하지 않는다('cat'이 반복 용어가 되는 등)
+    catalog = [(m.start(), m.end()) for m in P.CATALOG_PAREN.finditer(text)]
+    if catalog:
+        marks = [mk for mk in marks if not any(a <= mk.start and mk.end <= b for a, b in catalog)]
     # 겹치면 우선순위(참조 > 약어 > 수치·용어 설명 > 확신 > 추측)가 높은 것, 같으면 긴 것을 남긴다.
     marks.sort(key=lambda x: (PRIORITY[x.category], -(x.end - x.start), x.start))
     kept: list[Mark] = []

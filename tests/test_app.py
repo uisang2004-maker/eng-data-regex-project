@@ -498,3 +498,29 @@ def test_position_card_text_is_not_faded(at):
                                       "The network reaches high accuracy on the test set.")
     at.run()
     assert 'pp-card' in md_text(at) and ' est"' in md_text(at)    # 위치 추정 카드는 진한 글자 클래스
+
+
+@pytest.mark.parametrize("before,name", [
+    ("Bovine bile ", "Bovine bile"), ("alternatively, porcine bile ", "porcine bile"),
+    ("lipase can be used Porcine pancreatin ", "Porcine pancreatin"), ("CAUTION NaOH ", "NaOH"),
+    ("Bile Acid Assay Kit ", "Bile Acid Assay Kit"), ("water. 3,5-Dinitrosalicylic acid ", "3,5-Dinitrosalicylic acid"),
+    ("2 ", "")])
+def test_reagent_name_before_catalog_number(before, name):
+    from app import reagent_name
+    assert reagent_name(before) == name
+
+
+def test_materials_section_shows_found_cards_first(blank):
+    secs = protocol_sections()
+    mat = ("Bovine bile (Sigma-Aldrich, cat. no. B3883) is used for the intestinal phase of the method.\n\n"
+           "CAUTION NaOH (Merck, cat. no. 9141) is corrosive and causes severe skin burns.\n\n"
+           "Porcine pepsin (Sigma-Aldrich, cat. no. P7012) is stored at minus twenty degrees.")
+    secs[2] = {"title": "Materials", "text": mat}
+    at = open_paper_doc(blank, secs)
+    next(g for g in at.get("button_group") if g.key == "paper_page").set_value("본문").run()
+    next(g for g in at.get("button_group") if g.key == "section_pick").set_value(1).run()
+    out = md_text(at)
+    i_caution, i_reagent = out.index("주의 · CRITICAL·CAUTION"), out.index("시약·제품 · cat. no.")
+    assert i_caution < i_reagent and "<b>Bovine bile</b>" in out and "<b>NaOH</b>" in out
+    assert "멈춤 지점 · PAUSE POINT" in out and out.index("멈춤 지점 · PAUSE POINT") > i_reagent   # 빈 카드는 뒤로
+    assert re.search(r'<span class="pp-cat">\(.*?cat\. no\. B3883\)</span>', out)            # 품번은 흐리게

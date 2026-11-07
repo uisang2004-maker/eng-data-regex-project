@@ -320,6 +320,7 @@ header[data-testid="stHeader"], #MainMenu, footer, [data-testid="stToolbar"], [d
   display:flex; flex-direction:column; flex:1 1 auto; }
 .st-key-card_row .pp-card { height:auto; flex:1 1 auto; }
 .pp-end { border:0; border-top:2px solid #d9e3ee; margin:26px 0 8px; }
+.pp-cat { font-size:.82em; color:#8796a6; }
 .pp-jump { margin-left:10px; font-size:12px; font-weight:700; color:#3979b5; text-decoration:none; white-space:nowrap; }
 #pp-03 { scroll-margin-top:72px; }
 .pp-proto-list { margin:6px 0 0; padding-left:0; list-style:none; }
@@ -1586,7 +1587,10 @@ def ko_html(res, i: int, a, off=None) -> str:
 
 
 def en_html(a, s, uls) -> str:
-    return f'<div class="pp-text">{render_marked(a.text, s.start, s.end, a.marks, uls.get(s.idx))}</div>'
+    html_ = render_marked(a.text, s.start, s.end, a.marks, uls.get(s.idx))
+    # 시약 품번 괄호 '(Sigma-Aldrich, cat. no. B3883)'는 작고 흐리게: 지우지 않고 시약 이름이 눈에 띄게만 한다
+    html_ = CATALOG_HTML.sub(dim_catalog, html_)
+    return f'<div class="pp-text">{html_}</div>'
 
 
 def current_translation(a):
@@ -1694,6 +1698,15 @@ def float_pop(phrase: str, sent_idx: int | None, ctx) -> tuple[str, str]:
 
 LONG_SENTS = 40                       # 문장이 이보다 많은 글은 나눠 읽는다
 PART_SENTS = 30                       # 소제목 위치를 모를 때 한 부분의 문장 수
+CATALOG_HTML = re.compile(r"\((?:[^()]*?,\s*)?cat\.\s*no\.[^()]*\)")   # 렌더된 HTML 안 품번 괄호
+
+
+def dim_catalog(m) -> str:
+    """품번 괄호를 흐린 글씨로 감싼다. 안에 형광펜 태그('Sigma-Aldrich' 반복 용어)가 있어도 짝이 맞을 때만 감싼다."""
+    inner = m.group()
+    if inner.count("<span") != inner.count("</span>"):
+        return inner
+    return f'<span class="pp-cat">{inner}</span>'
 PART_PILLS_MAX = 6                    # 부분이 이보다 많으면 버튼 대신 드롭다운
 
 
@@ -1723,8 +1736,25 @@ def protocol_section(a) -> bool:
     return sum(bool(P.PROTO_CAUTION.search(s.text) or P.PROTO_PAUSE.search(s.text)) for s in a.sentences) >= 3
 
 
+def reagent_name(before: str) -> str:
+    """품번 괄호 바로 앞 글자에서 시약 이름: 마지막 문장·목록 경계 뒤, 대문자(또는 '3,5-Di…'처럼 숫자+글자)로
+    시작하는 마지막 낱말부터. 대문자가 없으면 끝 세 낱말('porcine bile'). 글자가 없으면 ''."""
+    tail = re.split(r"[;.)\n]\s*|,\s+", before)[-1].split()
+    starts = [i for i, w in enumerate(tail) if w[:1].isupper() and w != "CAUTION" or re.match(r"\d[\d,]*-[A-Za-z]", w)]
+    if starts:
+        i = starts[-1]
+        while i - 1 in starts:             # 'Bile Acid Assay Kit'처럼 대문자 낱말이 이어지면 처음부터
+            i -= 1
+        words = tail[i:]
+    else:
+        words = tail[-3:]
+    name = " ".join(words).strip(" ,")
+    return name if re.search(r"[A-Za-z]{3}", name) else ""
+
+
 def protocol_cards(a) -> None:
-    """절차 요점 카드 3장: 주의(CRITICAL·CAUTION) · 멈춤 지점(PAUSE POINT) · 단계와 소요 시간. 모두 원문 문장 그대로."""
+    """절차 요점 카드 3장: 주의(CRITICAL·CAUTION) · 멈춤 지점(PAUSE POINT) · 단계와 소요 시간 · 시약·제품(품번) 중
+    원문에서 찾은 것이 있는 카드부터. 모두 원문 글자 그대로."""
     def items(pat, limit=3):
         hits = [s for s in a.sentences if pat.search(s.text)]
         lis = []
@@ -1738,22 +1768,36 @@ def protocol_cards(a) -> None:
     sec = section_now()
     steps = [int(m.group("n")) for m in P.PROTO_STEP.finditer(a.text)]
     timed = [h for h in (sec.subheads if sec else []) if "Timing" in h]
-    cards = []
-    for kind, title, color, pat, none_msg in (
-            ("caution", "주의 · CRITICAL·CAUTION", "blue", P.PROTO_CAUTION, "이 절에는 주의(CRITICAL·CAUTION) 표시가 없어요."),
-            ("pause", "멈춤 지점 · PAUSE POINT", "teal", P.PROTO_PAUSE, "이 절에는 멈춰도 되는 지점(PAUSE POINT) 표시가 없어요.")):
+    cards = []                             # (찾았는지, 제목, 색, 개수, 본문)
+    for title, color, pat, none_msg in (
+            ("주의 · CRITICAL·CAUTION", "blue", P.PROTO_CAUTION, "이 절에는 주의(CRITICAL·CAUTION) 표시가 없어요."),
+            ("멈춤 지점 · PAUSE POINT", "teal", P.PROTO_PAUSE, "이 절에는 멈춰도 되는 지점(PAUSE POINT) 표시가 없어요.")):
         hits, lis = items(pat)
         body = (f'<ul class="pp-proto-list">{lis}</ul>' if hits else f'<div class="pp-sk-missing">{none_msg}</div>')
-        more = f" · 처음 3개만" if len(hits) > 3 else ""
-        cards.append((title, color, f"{len(hits)}개{more}", body))
+        more = " · 처음 3개만" if len(hits) > 3 else ""
+        cards.append((bool(hits), title, color, f"{len(hits)}개{more}", body))
     hits, lis = items(P.PROTO_TIMING)
     head = []
     if steps:
         head.append(f"<li>번호 단계 <b>{min(steps)}–{max(steps)}</b> · {len(set(steps))}개</li>")
     head += [f"<li>{esc(h)}</li>" for h in timed[:3]]
-    body = f'<ul class="pp-proto-list">{"".join(head)}{lis}</ul>' if head or hits else         '<div class="pp-sk-missing">이 절에는 번호 단계나 소요 시간 표시가 없어요.</div>'
-    cards.append(("단계 · 소요 시간", "violet", f"단계 {len(set(steps))}개", body))
-    for col, (title, color, count, body) in zip(st.columns(3), cards):
+    body = (f'<ul class="pp-proto-list">{"".join(head)}{lis}</ul>' if head or hits else
+            '<div class="pp-sk-missing">이 절에는 번호 단계나 소요 시간 표시가 없어요.</div>')
+    cards.append((bool(head or hits), "단계 · 소요 시간", "violet", f"단계 {len(set(steps))}개", body))
+    # 시약·제품: 'Bovine bile (Sigma-Aldrich, cat. no. B3883)'처럼 품번이 붙은 항목. 이름은 괄호 바로 앞 낱말들
+    names = []
+    for m in P.CATALOG_PAREN.finditer(a.text):
+        name = reagent_name(a.text[max(0, m.start() - 80):m.start()])
+        if name and name not in names:
+            names.append(name)
+    lis = "".join(f"<li><b>{esc(n)}</b></li>" for n in names[:5])
+    body = (f'<ul class="pp-proto-list">{lis}</ul>' if names else
+            '<div class="pp-sk-missing">이 절에는 품번(cat. no.)이 붙은 시약·제품이 없어요.</div>')
+    more = " · 처음 5개만" if len(names) > 5 else ""
+    cards.append((bool(names), "시약·제품 · cat. no.", "blue", f"{len(names)}개{more}", body))
+    # 찾은 것이 있는 카드부터 3장(빈 카드만 나란히 서지 않게). 순서는 위에 적은 차례를 지킨다
+    shown_cards = ([c for c in cards if c[0]] + [c for c in cards if not c[0]])[:3]
+    for col, (_, title, color, count, body) in zip(st.columns(3), shown_cards):
         col.markdown(f'<div class="pp-panel pp-card {color}"><div class="pp-card-head"><div class="pp-kind">'
                      f'<span class="pp-kdot"></span>{title}</div><div class="pp-basis signal">{esc(count)}</div></div>'
                      f'{body}<div class="pp-reason">{ICON["info"]}<span>실험 절차 절이라 문제·방법·결과 대신 원문에 '

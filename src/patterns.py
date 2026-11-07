@@ -463,6 +463,13 @@ PROTO_STEP = re.compile(r"(?:^|(?<=[.!?)]\s))(?P<n>\d{1,2})\s+(?=[A-Z][a-z]|\()"
 소요 시간(``Timing 5–8 h``·``~4 d``), 번호 단계(``7 Oral phase …``: 줄 첫머리나 문장 끝 바로 뒤의 번호).
 번호 단계는 문장 분리가 단계 사이를 나누지 않는 경우가 있어 문장이 아니라 글 전체에서 센다."""
 
+PROTO_MARK_WORDS = frozenset({"CAUTION", "CRITICAL", "STEP", "PAUSE", "POINT", "TROUBLESHOOTING", "TIMING", "PROCEDURE"})
+"""프로토콜 원문의 대문자 표시 낱말: 약어 후보에서 뺀다('CAUTION: 이 글에서 정의를 찾지 못함'이 되지 않게)."""
+
+CATALOG_PAREN = re.compile(r"\((?:[^()]*?,\s*)?cat\.\s*no\.[^()]*\)")
+"""시약·제품 품번 괄호: ``(Sigma-Aldrich, cat. no. B3883)``·``(Merck, cat. no. 9141)``. 실험 절차 절의 '시약·제품' 카드와
+본문에서 품번을 흐리게 보여 줄 때 쓴다(원문은 지우지 않는다)."""
+
 FALLBACK_TITLE = re.compile(r"^(?:\d+\s+)?(?:Abstract|Introduction|Background)\b", re.I)
 """위치로 대신 고르는 뼈대 카드(첫 문장=배경 등)는 초록·서론·결론에서만 의미가 있다. 본문 절에서는 이 제목일 때만 쓴다."""
 
